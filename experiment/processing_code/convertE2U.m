@@ -1,0 +1,259 @@
+% Tri-axial Hot-Wire Probe Data Processing
+% Based on Dantec Dynamics procedures (pages 30-31)
+% Tri-axial Hot-Wire Probe Data Processing with Calibration Extraction
+% Extracts calibration from MiniCTA header file
+
+%% Main Script
+% Load calibration data
+% cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_50-200rpm_global_export.txt'; % Change to your header file
+% cal = parse_calibration(cal_file);
+% 
+% % Display extracted calibration
+% fprintf('Calibration Coefficients Extracted:\n');
+% fprintf('Sensor 1: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+%     cal.C0_1, cal.C1_1, cal.C2_1, cal.C3_1, cal.C4_1);
+% fprintf('Sensor 2: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+%     cal.C0_2, cal.C1_2, cal.C2_2, cal.C3_2, cal.C4_2);
+% fprintf('Sensor 3: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+%     cal.C0_3, cal.C1_3, cal.C2_3, cal.C3_3, cal.C4_3);
+% fprintf('\nYaw factors squared: k1²=%.6f, k2²=%.6f, k3²=%.6f\n', ...
+%     cal.k1_sq, cal.k2_sq, cal.k3_sq);
+% fprintf('Pitch factors squared: h1²=%.6f, h2²=%.6f, h3²=%.6f\n', ...
+%     cal.h1_sq, cal.h2_sq, cal.h3_sq);
+% fprintf('Reference Terature: %.2f °C\n', cal.T_ref);
+
+
+%% Load Data
+% Assuming data file has columns: [Time, E1, E2, E3, T, U_ref]
+files = {'ramp-up_50-200rpm.txt', 'ramp-up_200-400rpm.txt', 'ramp-up_400-600rpm.txt', 'ramp-up_600-800rpm.txt'};
+rpm_ranges = {[50,200], [200,400], [400,600], [600,800]};
+
+base_path = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_voltage\';
+
+data_collection = struct();
+for n = 1:length(files)
+    data_collection(n).filename = files{n};
+    data_collection(n).RPM = rpm_ranges{n};
+    
+    % Read data
+    data = readmatrix(fullfile(base_path, files{n}));
+    % data = readmatrix('G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_voltage\ramp-up_50-200rpm.txt'); % Change filename as needed
+
+time = data(:, 1);
+E1 = data(:, 2);
+E2 = data(:, 3);
+E3 = data(:, 4);
+E_T = data(:, 5);
+E_ref = data(:, 6);
+
+%% Temperature conversion              
+cal.C0_T=5.3065;
+cal.C1_T=-25.309;
+cal.C2_T=-0.7779;
+cal.C3_T=-0.5073;
+
+% Temperature calibration using logarithmic-polynomial
+T = cal.C0_T + cal.C1_T*log(E_T) + cal.C2_T*log(E_T).^2 + ...
+    cal.C3_T*log(E_T).^3;
+
+%% Velocity reference transducer
+%% Dantec 54T29 Velocity Reference Transducer Calibration
+
+cal_ref.TR = 24.68;  % Temperature ratio
+cal_ref.PR = 100.2;  % Pressure ratio
+cal_ref.G1 = 60;     % Gain 1
+cal_ref.G2 = 20;     % Gain 2
+cal_ref.U0 = 0.05;   % Velocity breakpoint 0 (m/s)
+cal_ref.U1 = 0.5;    % Velocity breakpoint 1 (m/s)
+cal_ref.U2 = 8;      % Velocity breakpoint 2 (m/s)
+cal_ref.U3 = 33;     % Velocity breakpoint 3 (m/s)
+
+% The 54T29 uses a segmented square-root relationship:
+% U = U_i + G_i * sqrt(E - E_i) for voltage range i
+
+% First, we need to calculate the voltage breakpoints from velocity breakpoints
+% Rearranging: E = E_i + ((U - U_i)/G_i)^2
+
+% Calculate voltage breakpoints (working backwards from velocity breakpoints)
+% Assuming E0 = 0V at U0 (or close to zero flow)
+E0 = 0;
+E1 = E0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
+E2 = E1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
+
+% fprintf('Calculated voltage breakpoints:\n');
+% fprintf('E0 = %.4f V at U0 = %.2f m/s\n', E0, cal_ref.U0);
+% fprintf('E1 = %.4f V at U1 = %.2f m/s\n', E1, cal_ref.U1);
+% fprintf('E2 = %.4f V at U2 = %.2f m/s\n', E2, cal_ref.U2);
+% fprintf('E3+ for U > %.2f m/s\n\n', cal_ref.U2);
+
+% %% Voltage to Velocity Conversion Function
+% function U = voltage_to_velocity_54T29(E, cal_ref)
+%     % Segmented calibration for Dantec 54T29
+    
+    % Calculate voltage breakpoints
+    E0 = 0;
+    E1 = E0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
+    E2 = E1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
+    
+    % Initialize output
+    U_ref = zeros(size(E_ref));
+    
+    % Segment 1: E0 to E1 (U0 to U1)
+    mask1 = (E_ref >= E0) & (E_ref < E1);
+    U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E0);
+    
+    % Segment 2: E1 to E2 (U1 to U2)
+    mask2 = (E_ref >= E1) & (E_ref < E2);
+    U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E1);
+    
+    % Segment 3: E2 and above (U2 to U3)
+    % For higher velocities, typically continues with G2
+    mask3 = (E_ref >= E2);
+    U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E1);
+    
+    % Handle very low voltages
+    U_ref(E_ref < E0) = cal_ref.U0;
+% end
+
+%% Temperature Correction (Optional - set to false if not needed)
+apply_T_correction = false; % Set to true if Temperature varies
+
+if apply_T_correction
+    T_w = 200 + cal.T_ref; % Assuming 200°C overheat
+    E1_corr = E1 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
+    E2_corr = E2 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
+    E3_corr = E3 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
+else
+    E1_corr = E1;
+    E2_corr = E2;
+    E3_corr = E3;
+end
+
+%% Linearization: Convert voltages to calibration velocities
+Ucal1 = cal.C0_1 + cal.C1_1*E1_corr + cal.C2_1*E1_corr.^2 + ...
+        cal.C3_1*E1_corr.^3 + cal.C4_1*E1_corr.^4;
+Ucal2 = cal.C0_2 + cal.C1_2*E2_corr + cal.C2_2*E2_corr.^2 + ...
+        cal.C3_2*E2_corr.^3 + cal.C4_2*E2_corr.^4;
+Ucal3 = cal.C0_3 + cal.C1_3*E3_corr + cal.C2_3*E3_corr.^2 + ...
+        cal.C3_3*E3_corr.^3 + cal.C4_3*E3_corr.^4;
+%% Terature 
+
+%% Decomposition into velocities in the wire-coordinate system (U1, U2, U3)
+% Using the general equations from page 31
+
+% Calculate wire velocities using directional sensitivity
+cos_angle = cosd(35.3); % 35.3° is the wire angle for tri-axial probes
+
+% Solve the system of equations
+A = [cal.k1_sq, 1, cal.h1_sq;
+     cal.h2_sq, cal.k2_sq, 1;
+     1, cal.h3_sq, cal.k3_sq];
+
+% For each time point (vectorized for efficiency)
+U1_sq = zeros(size(Ucal1));
+U2_sq = zeros(size(Ucal2));
+U3_sq = zeros(size(Ucal3));
+
+for i = 1:length(Ucal1)
+    B = [Ucal1(i)^2 * (1 + cal.k1_sq + cal.h1_sq).^2 * cos_angle^2;
+         Ucal2(i)^2 * (1 + cal.k2_sq + cal.h2_sq).^2 * cos_angle^2;
+         Ucal3(i)^2 * (1 + cal.k3_sq + cal.h3_sq).^2 * cos_angle^2];
+    
+    U_sq = A \ B;
+    U1_sq(i) = max(U_sq(1), 0); % Ensure non-negative
+    U2_sq(i) = max(U_sq(2), 0);
+    U3_sq(i) = max(U_sq(3), 0);
+end
+
+U1 = sqrt(U1_sq);
+U2 = sqrt(U2_sq);
+U3 = sqrt(U3_sq);
+
+%% Transform to probe coordinates using transformation matrix
+% % If Mp matrix was found in calibration file, use it
+% if isfield(cal, 'Mp')
+%     velocity_wire = [U1'; U2'; U3'];
+%     velocity_probe = cal.Mp * velocity_wire;
+%     U = velocity_probe(1, :)';
+%     V = velocity_probe(2, :)';
+%     W = velocity_probe(3, :)';
+% else
+    % Use default transformation (page 31 equations)
+    U = U1 * cosd(54.74) + U2 * cosd(54.74) + U3 * cosd(54.74);
+    V = -U1 * cosd(45) - U2 * cosd(135) + U3 * cosd(90);
+    W = -U1 * cosd(114.09) - U2 * cosd(114.09) - U3 * cosd(35.26);
+% end
+%% Store data
+    data_collection(n).U = U;
+    data_collection(n).V = V;
+    data_collection(n).W = W;
+    data_collection(n).T = T;
+    data_collection(n).U_ref = U_ref;
+    data_collection(n).time = time;
+end
+
+%% Calculate Statistics
+U_mean = mean(U);
+V_mean = mean(V);
+W_mean = mean(W);
+U_rms = std(U);
+V_rms = std(V);
+W_rms = std(W);
+U_mag = sqrt(U.^2 + V.^2 + W.^2);
+U_mag_mean = mean(U_mag);
+
+fprintf('\n=== Velocity Statistics ===\n');
+fprintf('Mean velocities:\n');
+fprintf('  U_mean = %.3f m/s\n', U_mean);
+fprintf('  V_mean = %.3f m/s\n', V_mean);
+fprintf('  W_mean = %.3f m/s\n', W_mean);
+fprintf('  |U|_mean = %.3f m/s\n', U_mag_mean);
+fprintf('\nRMS velocities:\n');
+fprintf('  U_rms = %.3f m/s\n', U_rms);
+fprintf('  V_rms = %.3f m/s\n', V_rms);
+fprintf('  W_rms = %.3f m/s\n', W_rms);
+fprintf('\nTurbulence intensities:\n');
+fprintf('  Tu_u = %.2f%%\n', 100*U_rms/U_mean);
+fprintf('  Tu_v = %.2f%%\n', 100*V_rms/U_mean);
+fprintf('  Tu_w = %.2f%%\n', 100*W_rms/U_mean);
+
+%% Visualization
+figure;
+for n=length(files):-1:1
+subplot(3,2,1); hold on; plot(data_collection(n).time, data_collection(n).U);
+ylabel('U (m/s)'); title('Streamwise Velocity');
+subplot(3,2,3); hold on; plot(data_collection(n).time, data_collection(n).V);
+ylabel('V (m/s)'); title('Lateral Velocity');
+subplot(3,2,5); hold on; plot(data_collection(n).time, data_collection(n).W);
+ylabel('W (m/s)'); xlabel('Time (s)'); title('Vertical Velocity');
+
+% T
+subplot(3,2,2);hold on;
+plot(data_collection(n).time, data_collection(n).T);
+% xlabel('Time [s]');
+ylabel('T [C]');
+title('Temperature');
+
+% U_ref
+subplot(3,2,4);hold on;
+plot(data_collection(n).time, data_collection(n).U_ref);
+xlabel('Time [s]');
+ylabel('U_{ref} [V]');
+title('Reference Velocity');
+
+end
+%%
+figure;plot(linspace(0,125*4,500000*4),[data_collection(1).U_ref;data_collection(2).U_ref;data_collection(3).U_ref;data_collection(4).U_ref])
+hold on;plot([125,125],[0.4,0.8],'k:')
+hold on;plot([125,125]*2,[0.4,0.8],'k:')
+hold on;plot([125,125]*3,[0.4,0.8],'k:')
+xlabel('Time [s]');
+ylabel('U_{ref} [V]');
+title('Reference Velocity');
+
+
+%% Save Results
+
+results = [time, U, V, W, T, U_ref];
+writematrix(results, 'velocity_components_UVW.csv');
+fprintf('\nResults saved to velocity_components_UVW.csv\n');
