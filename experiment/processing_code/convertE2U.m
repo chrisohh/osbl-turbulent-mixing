@@ -5,22 +5,22 @@
 
 %% Main Script
 % Load calibration data
-% cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_50-200rpm_global_export.txt'; % Change to your header file
-% cal = parse_calibration(cal_file);
-% 
-% % Display extracted calibration
-% fprintf('Calibration Coefficients Extracted:\n');
-% fprintf('Sensor 1: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
-%     cal.C0_1, cal.C1_1, cal.C2_1, cal.C3_1, cal.C4_1);
-% fprintf('Sensor 2: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
-%     cal.C0_2, cal.C1_2, cal.C2_2, cal.C3_2, cal.C4_2);
-% fprintf('Sensor 3: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
-%     cal.C0_3, cal.C1_3, cal.C2_3, cal.C3_3, cal.C4_3);
-% fprintf('\nYaw factors squared: k1²=%.6f, k2²=%.6f, k3²=%.6f\n', ...
-%     cal.k1_sq, cal.k2_sq, cal.k3_sq);
-% fprintf('Pitch factors squared: h1²=%.6f, h2²=%.6f, h3²=%.6f\n', ...
-%     cal.h1_sq, cal.h2_sq, cal.h3_sq);
-% fprintf('Reference Terature: %.2f °C\n', cal.T_ref);
+cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_50-200rpm_global_export.txt'; % Change to your header file
+cal = parse_calibration(cal_file);
+
+% Display extracted calibration
+fprintf('Calibration Coefficients Extracted:\n');
+fprintf('Sensor 1: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+    cal.C0_1, cal.C1_1, cal.C2_1, cal.C3_1, cal.C4_1);
+fprintf('Sensor 2: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+    cal.C0_2, cal.C1_2, cal.C2_2, cal.C3_2, cal.C4_2);
+fprintf('Sensor 3: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
+    cal.C0_3, cal.C1_3, cal.C2_3, cal.C3_3, cal.C4_3);
+fprintf('\nYaw factors squared: k1²=%.6f, k2²=%.6f, k3²=%.6f\n', ...
+    cal.k1_sq, cal.k2_sq, cal.k3_sq);
+fprintf('Pitch factors squared: h1²=%.6f, h2²=%.6f, h3²=%.6f\n', ...
+    cal.h1_sq, cal.h2_sq, cal.h3_sq);
+fprintf('Reference Terature: %.2f °C\n', cal.T_ref);
 
 
 %% Load Data
@@ -67,54 +67,38 @@ cal_ref.U0 = 0.05;   % Velocity breakpoint 0 (m/s)
 cal_ref.U1 = 0.5;    % Velocity breakpoint 1 (m/s)
 cal_ref.U2 = 8;      % Velocity breakpoint 2 (m/s)
 cal_ref.U3 = 33;     % Velocity breakpoint 3 (m/s)
-
-% The 54T29 uses a segmented square-root relationship:
-% U = U_i + G_i * sqrt(E - E_i) for voltage range i
-
-% First, we need to calculate the voltage breakpoints from velocity breakpoints
-% Rearranging: E = E_i + ((U - U_i)/G_i)^2
-
-% Calculate voltage breakpoints (working backwards from velocity breakpoints)
-% Assuming E0 = 0V at U0 (or close to zero flow)
-E0 = 0;
-E1 = E0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
-E2 = E1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
-
-% fprintf('Calculated voltage breakpoints:\n');
-% fprintf('E0 = %.4f V at U0 = %.2f m/s\n', E0, cal_ref.U0);
-% fprintf('E1 = %.4f V at U1 = %.2f m/s\n', E1, cal_ref.U1);
-% fprintf('E2 = %.4f V at U2 = %.2f m/s\n', E2, cal_ref.U2);
-% fprintf('E3+ for U > %.2f m/s\n\n', cal_ref.U2);
-
-% %% Voltage to Velocity Conversion Function
-% function U = voltage_to_velocity_54T29(E, cal_ref)
-%     % Segmented calibration for Dantec 54T29
-    
-    % Calculate voltage breakpoints
-    E0 = 0;
-    E1 = E0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
-    E2 = E1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
-    
-    % Initialize output
-    U_ref = zeros(size(E_ref));
-    
-    % Segment 1: E0 to E1 (U0 to U1)
-    mask1 = (E_ref >= E0) & (E_ref < E1);
-    U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E0);
-    
-    % Segment 2: E1 to E2 (U1 to U2)
-    mask2 = (E_ref >= E1) & (E_ref < E2);
-    U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E1);
-    
-    % Segment 3: E2 and above (U2 to U3)
-    % For higher velocities, typically continues with G2
-    mask3 = (E_ref >= E2);
-    U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E1);
-    
-    % Handle very low voltages
-    U_ref(E_ref < E0) = cal_ref.U0;
-% end
-
+% 
+% % The 54T29 uses a segmented square-root relationship:
+% % U = U_i + G_i * sqrt(E - E_i) for voltage range i
+% 
+% % First, we need to calculate the voltage breakpoints from velocity breakpoints
+% % Rearranging: E = E_i + ((U - U_i)/G_i)^2
+% 
+% % Calculate voltage breakpoints (working backwards from velocity breakpoints)
+% % Use different variable names to avoid confusion with sensor voltages
+% E_ref_0 = 0;
+% E_ref_1 = E_ref_0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
+% E_ref_2 = E_ref_1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
+% 
+% % Initialize output
+% U_ref = zeros(size(E_ref));
+% 
+% % Segment 1: E_ref_0 to E_ref_1 (U0 to U1)
+% mask1 = (E_ref >= E_ref_0) & (E_ref < E_ref_1);
+% U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E_ref_0);
+% 
+% % Segment 2: E_ref_1 to E_ref_2 (U1 to U2)
+% mask2 = (E_ref >= E_ref_1) & (E_ref < E_ref_2);
+% U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E_ref_1);
+% 
+% % Segment 3: E_ref_2 and above (U2 to U3)
+% mask3 = (E_ref >= E_ref_2);
+% U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E_ref_1);
+% 
+% % Handle very low voltages
+% U_ref(E_ref < E_ref_0) = cal_ref.U0;
+% % end
+U_ref = A * E_ref^B;
 %% Temperature Correction (Optional - set to false if not needed)
 apply_T_correction = false; % Set to true if Temperature varies
 
@@ -243,13 +227,14 @@ title('Reference Velocity');
 
 end
 %%
-figure;plot(linspace(0,125*4,500000*4),[data_collection(1).U_ref;data_collection(2).U_ref;data_collection(3).U_ref;data_collection(4).U_ref])
-hold on;plot([125,125],[0.4,0.8],'k:')
-hold on;plot([125,125]*2,[0.4,0.8],'k:')
-hold on;plot([125,125]*3,[0.4,0.8],'k:')
+figure;plot(linspace(0,60*7,60*4000*7),[data_collection(1).T;data_collection(2).T;data_collection(3).T;data_collection(4).T;data_collection(5).T;data_collection(6).T;data_collection(7).T])
+hold on;plot([60,60],[25,26],'k:')
+hold on;plot([60,60]*2,[25,26],'k:')
+hold on;plot([60,60]*3,[25,26],'k:');
+hold on;plot([60,60]*4,[25,26],'k:');plot([60,60]*5,[25,26],'k:');plot([60,60]*6,[25,26],'k:');plot([60,60]*7,[25,26],'k:')
 xlabel('Time [s]');
-ylabel('U_{ref} [V]');
-title('Reference Velocity');
+ylabel('U [m/s]');
+
 
 
 %% Save Results

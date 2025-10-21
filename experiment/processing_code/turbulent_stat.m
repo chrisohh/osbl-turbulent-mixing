@@ -1,58 +1,25 @@
-%% 7. Power spectral density
-%% Frequency analysis using FFT (no toolbox needed)
-fs=4*10^3;
-U_mag = sqrt(data_collection(1).U.^2 + data_collection(1).V.^2 + data_collection(1).W.^2);
-[~,start_idx]=min(abs(data_collection(1).time-40));
-steady_state_idx=[start_idx:length(U_mag)];
+%% Power spectral density
+%% pwelch 
 % Take steady-state portion only
-U_steady = U_mag(steady_state_idx);
-time_steady = data_collection(1).time(steady_state_idx);
-N = length(U_steady);
+time_raw=data_collection(6).time;
+% u_mag=sqrt((data_collection(6).U).^2+(data_collection(6).V).^2+(data_collection(6).W).^2);
+u_raw=data_collection(6).T;%_mag;
+fs = 1/mean(diff(time_raw),'omitnan');
+figure;plot(time_raw,u_mag)
+[~,start_idx]=min(abs(time_raw-0));
+[~,end_idx]=min(abs(time_raw-60));
+steady_state_idx=[start_idx:end_idx];
+U_steady=u_raw(start_idx:end_idx);
+time_steady = time_raw(steady_state_idx);
 
-% Remove mean
-U_fluctuation = U_steady - mean(U_steady);
-
-% Compute FFT
-Y = fft(U_fluctuation);
-P2 = abs(Y/N).^2;
-P1 = P2(1:floor(N/2)+1);
-P1(2:end-1) = 2*P1(2:end-1);
-
-% Frequency vector
-freq = fs*(0:(floor(N/2)))/N;
-
-% Power spectral density (Welch-like with single segment)
-psd = P1 * fs;
+% Power spectral density
+[psd, freq] = pwelch(U_steady - mean(U_steady), [], [], [], fs);
 
 figure;
-loglog(freq(2:end), psd(2:end), 'LineWidth', 1.5);
+loglog(freq, psd, 'LineWidth', 1.5);
 xlabel('Frequency (Hz)'); ylabel('PSD (m^2/s^2/Hz)');
 title('Power Spectral Density - Steady State');
-xlim([freq(2) fs/2]);
 
-hold on;plot([460,460],10.^[-12,2],'k:')
-
-%% pwelch 
-% % Take steady-state portion only
-% fs = 1/mean(diff(data_collection(n).time));
-% U_steady = U_mag(steady_state_idx);
-% time_steady = data_collection(n).time(steady_state_idx);
-% 
-% % Power spectral density
-% [psd, freq] = pwelch(U_steady - mean(U_steady), [], [], [], fs);
-% 
-% figure;
-% loglog(freq, psd, 'LineWidth', 1.5);
-% xlabel('Frequency (Hz)'); ylabel('PSD (m^2/s^2/Hz)');
-% title('Power Spectral Density - Steady State');
-% grid on;
-% 
-% 
-% figure;
-% loglog(freq_welch(2:end), psd_welch(2:end), 'LineWidth', 1.5);
-% xlabel('Frequency (Hz)'); ylabel('PSD (m^2/s^2/Hz)');
-% title('Power Spectral Density (Welch-like estimate)');
-% grid on;
 
 %% 
 % % Turbulence typically shows:
@@ -105,15 +72,15 @@ fprintf('Turbulent RMS: %.4f m/s (%.1f%%)\n', turb_rms, 100*turb_rms^2/total_rms
 fprintf('Noise RMS: %.4f m/s (%.1f%%)\n', noise_rms, 100*noise_rms^2/total_rms^2);
 
 %% Reynolds Stress Analysis
-n = 1; % Select dataset
+% n = 1; % Select dataset
 
-% Use only steady-state data
-U_steady = data_collection(n).U(steady_state_idx);
-V_steady = data_collection(n).V(steady_state_idx);
-W_steady = data_collection(n).W(steady_state_idx);
+% % Use only steady-state data
+% U_steady = data_collection(n).U(steady_state_idx);
+% V_steady = data_collection(n).V(steady_state_idx);
+% W_steady = data_collection(n).W(steady_state_idx);
 
 % Optional: Apply low-pass filter to remove noise (recommended)
-cutoff_freq = 460; % Hz - based on your PSD analysis
+cutoff_freq = 10; % Hz - based on your PSD analysis
 filter_window = round(fs / cutoff_freq);
 U_steady = movmean(U_steady, filter_window);
 V_steady = movmean(V_steady, filter_window);
