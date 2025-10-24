@@ -1,4 +1,13 @@
 load('G:\My Drive\OSBL\GILL\20250923_Gill_SOARS_Data.mat')
+%% Plot raw
+figure;
+subplot(2,1,1);hold on;plot(GILL.time_str,GILL.ux);plot(GILL.time_str,GILL.uy);plot(GILL.time_str,GILL.uz)
+subplot(2,1,2);hold on;plot(GILL.time_str,GILL.temp)
+
+subplot(2,1,1);set(gca,'fontsize',12),xlabel('Time'),ylabel('Velocity (m/s)')
+subplot(2,1,2);set(gca,'fontsize',12),xlabel('Time'),ylabel('Sonic Temperature (\circC)')
+
+%%
 duration_sec=(datenum(GILL.time_str)-datenum(GILL.time_str(1)))*24*3600;
 time_rampup=1:16196;
 figure;hold on

@@ -5,7 +5,7 @@
 
 %% Main Script
 % Load calibration data
-cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_50-200rpm_global_export.txt'; % Change to your header file
+cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe1\probe1_ramp-up_50-200rpm.txt'; % Change to your header file
 cal = parse_calibration(cal_file);
 
 % Display extracted calibration
@@ -25,10 +25,10 @@ fprintf('Reference Terature: %.2f °C\n', cal.T_ref);
 
 %% Load Data
 % Assuming data file has columns: [Time, E1, E2, E3, T, U_ref]
-files = {'ramp-up_50-200rpm.txt', 'ramp-up_200-400rpm.txt', 'ramp-up_400-600rpm.txt', 'ramp-up_600-800rpm.txt'};
+files = {'probe1_ramp-up_50-200rpm.txt', 'probe1_ramp-up_200-300rpm.txt', 'probe1_ramp-up_300-400rpm.txt'};%, 'ramp-up_600-800rpm.txt'};
 rpm_ranges = {[50,200], [200,400], [400,600], [600,800]};
 
-base_path = 'G:\My Drive\OSBL\CalibratorTest1\probe2\probe2_voltage\';
+base_path = 'G:\My Drive\OSBL\CalibratorTest1\probe1';
 
 data_collection = struct();
 for n = 1:length(files)
@@ -68,37 +68,37 @@ cal_ref.U1 = 0.5;    % Velocity breakpoint 1 (m/s)
 cal_ref.U2 = 8;      % Velocity breakpoint 2 (m/s)
 cal_ref.U3 = 33;     % Velocity breakpoint 3 (m/s)
 % 
-% % The 54T29 uses a segmented square-root relationship:
-% % U = U_i + G_i * sqrt(E - E_i) for voltage range i
-% 
-% % First, we need to calculate the voltage breakpoints from velocity breakpoints
-% % Rearranging: E = E_i + ((U - U_i)/G_i)^2
-% 
-% % Calculate voltage breakpoints (working backwards from velocity breakpoints)
-% % Use different variable names to avoid confusion with sensor voltages
-% E_ref_0 = 0;
-% E_ref_1 = E_ref_0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
-% E_ref_2 = E_ref_1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
-% 
-% % Initialize output
-% U_ref = zeros(size(E_ref));
-% 
-% % Segment 1: E_ref_0 to E_ref_1 (U0 to U1)
-% mask1 = (E_ref >= E_ref_0) & (E_ref < E_ref_1);
-% U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E_ref_0);
-% 
-% % Segment 2: E_ref_1 to E_ref_2 (U1 to U2)
-% mask2 = (E_ref >= E_ref_1) & (E_ref < E_ref_2);
-% U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E_ref_1);
-% 
-% % Segment 3: E_ref_2 and above (U2 to U3)
-% mask3 = (E_ref >= E_ref_2);
-% U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E_ref_1);
-% 
-% % Handle very low voltages
-% U_ref(E_ref < E_ref_0) = cal_ref.U0;
+% The 54T29 uses a segmented square-root relationship:
+% U = U_i + G_i * sqrt(E - E_i) for voltage range i
+
+% First, we need to calculate the voltage breakpoints from velocity breakpoints
+% Rearranging: E = E_i + ((U - U_i)/G_i)^2
+
+% Calculate voltage breakpoints (working backwards from velocity breakpoints)
+% Use different variable names to avoid confusion with sensor voltages
+E_ref_0 = 0;
+E_ref_1 = E_ref_0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
+E_ref_2 = E_ref_1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
+
+% Initialize output
+U_ref = zeros(size(E_ref));
+
+% Segment 1: E_ref_0 to E_ref_1 (U0 to U1)
+mask1 = (E_ref >= E_ref_0) & (E_ref < E_ref_1);
+U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E_ref_0);
+
+% Segment 2: E_ref_1 to E_ref_2 (U1 to U2)
+mask2 = (E_ref >= E_ref_1) & (E_ref < E_ref_2);
+U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E_ref_1);
+
+% Segment 3: E_ref_2 and above (U2 to U3)
+mask3 = (E_ref >= E_ref_2);
+U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E_ref_1);
+
+% Handle very low voltages
+U_ref(E_ref < E_ref_0) = cal_ref.U0;
 % % end
-U_ref = A * E_ref^B;
+% U_ref = A * E_ref^B;
 %% Temperature Correction (Optional - set to false if not needed)
 apply_T_correction = false; % Set to true if Temperature varies
 
@@ -174,6 +174,7 @@ U3 = sqrt(U3_sq);
     data_collection(n).T = T;
     data_collection(n).U_ref = U_ref;
     data_collection(n).time = time;
+    data_collection(n).E_ref = E_ref;
 end
 
 %% Calculate Statistics
@@ -220,7 +221,7 @@ title('Temperature');
 
 % U_ref
 subplot(3,2,4);hold on;
-plot(data_collection(n).time, data_collection(n).U_ref);
+plot(data_collection(n).time, data_collection(n).E_ref);
 xlabel('Time [s]');
 ylabel('U_{ref} [V]');
 title('Reference Velocity');
