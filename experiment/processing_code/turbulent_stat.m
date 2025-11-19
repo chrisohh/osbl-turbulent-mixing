@@ -1,9 +1,9 @@
 %% Power spectral density
 %% pwelch 
 % Take steady-state portion only
-time_raw=data_collection(6).time;
+% time_raw=data_collection(6).time;
 % u_mag=sqrt((data_collection(6).U).^2+(data_collection(6).V).^2+(data_collection(6).W).^2);
-u_raw=data_collection(6).T;%_mag;
+% u_raw=data_collection(6).T;%_mag;
 fs = 1/mean(diff(time_raw),'omitnan');
 figure;plot(time_raw,u_mag)
 [~,start_idx]=min(abs(time_raw-0));
