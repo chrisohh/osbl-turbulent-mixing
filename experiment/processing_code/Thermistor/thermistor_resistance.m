@@ -23,7 +23,7 @@ function RT = thermistor_resistance(T_celsius, R0, beta, T0)
         T0 = 25;        % Default reference temperature (°C)
     end
     if nargin < 3
-        beta = 3550;    % Default beta for Material System A, Curve 5
+        beta = 3521;    % Default beta for Material System A, Curve 5
     end
     if nargin < 2
         R0 = 10000;     % Default 10kΩ at 25°C

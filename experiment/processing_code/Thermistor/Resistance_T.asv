@@ -2,42 +2,42 @@
 clear; clc; close all;
 
 %% Parameters
-R0 = 10000;     % 10kΩ at 25°C
-beta = 3550;    % Material constant (K)
+R0 = [2,8,10,20]*1000;     % 10kΩ at 25°C
+beta = 3521;    % Material constant (K) B25/85
 T0 = 25;        % Reference temperature (°C)
 
 %% Temperature range for plotting
 T_range = linspace(0, 40, 1000);  % 0 to 40°C, 1000 points
 
 %% Calculate resistance curve
-R_range = thermistor_resistance(T_range, R0, beta, T0);
+R_range = thermistor_resistance(T_range, R0', beta, T0);
 
 %% Your specific operating points
-T_operating = [18, 19, 20, 25];
-R_operating = thermistor_resistance(T_operating, R0, beta, T0);
+T_operating = [18, 30];
+R_operating = thermistor_resistance(T_operating, R0', beta, T0);
 
 %% Plot
 figure('Position', [100, 100, 800, 600]);
 
 % Main curve
-plot(T_range, R_range/1000, 'b-', 'LineWidth', 2);
+plot(T_range, R_range/1000, 'LineWidth', 2);
 hold on;
 
 % Operating points
-plot(T_operating, R_operating/1000, 'ro', 'MarkerSize', 10, ...
-     'MarkerFaceColor', 'r', 'LineWidth', 2);
+plot(T_operating, R_operating/1000, 'ko', 'MarkerSize', 10, ...
+     'MarkerFaceColor', 'k', 'LineWidth', 2);
 
-% Highlight your water temperature range
-patch([18 20 20 18], [0 0 15 15], 'g', ...
-      'FaceAlpha', 0.1, 'EdgeColor', 'none');
+% % Highlight your water temperature range
+% patch([18 20 20 18], [0 0 15 15], 'g', ...
+%       'FaceAlpha', 0.1, 'EdgeColor', 'none');
 
 % Labels and formatting
 xlabel('Temperature (°C)', 'FontSize', 12);
-ylabel('Resistance (kΩ)', 'FontSize', 12);
-title(sprintf('FP07 Thermistor: R_0 = %.0f Ω at %.0f°C, \\beta = %.0f K', ...
+ylabel('Resistance (k$\Omega$)', 'FontSize', 12,'Interpreter','latex');
+title(sprintf('FP07 Thermistor: R_0 = %.0f \Omega at %.0f°C, \\beta = %.0f K', ...
               R0, T0, beta), 'FontSize', 14);
 grid on;
-legend('R(T) Curve', 'Operating Points', 'Your Water Range (18-20°C)', ...
+legend(num2str(R0(1)),num2str(R0(1)),num2str(R0(1)),num2str(R0(4)),, ...
        'Location', 'northeast');
 
 % Add text annotations for operating points
