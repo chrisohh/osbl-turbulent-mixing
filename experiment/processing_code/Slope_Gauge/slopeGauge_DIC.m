@@ -1,0 +1,474 @@
+%% CISG Design Calculator and Simulation
+% For SOARS wind-wave flume experiments
+clear; close all; clc;
+
+%% ========================================================================
+%  PART 1: PHYSICAL SETUP DESIGN
+%% ========================================================================
+
+% Experimental parameters
+camera_height = 100;  % cm above water surface (ADJUST THIS)
+water_depth = 30;     % cm depth of water above pattern (ADJUST THIS)
+max_wave_slope = 0.3; % maximum expected slope (dimensionless, ~17°)
+
+% Camera parameters
+sensor_width_mm = 8.8;   % typical 1/2" sensor width (check your camera spec)
+sensor_height_mm = 6.6;  % typical 1/2" sensor height
+focal_length_mm = 16;    % lens focal length (ADJUST based on your lens)
+pixel_width = 1600;      % camera horizontal pixels
+pixel_height = 1200;     % camera vertical pixels
+
+% Calculate field of view
+total_height = camera_height + water_depth;  % total optical path
+
+% FOV in air (simple thin lens)
+FOV_width_air = 2 * total_height * tan(atan(sensor_width_mm/(2*focal_length_mm)));
+FOV_height_air = 2 * total_height * tan(atan(sensor_height_mm/(2*focal_length_mm)));
+
+% Refraction correction (approximate)
+n_water = 1.333;
+n_air = 1.000;
+
+% Effective FOV at pattern (accounts for refraction at interface)
+% This is approximate - assumes paraxial rays
+FOV_width_pattern = FOV_width_air * (1 + water_depth/camera_height * (n_water/n_air - 1));
+FOV_height_pattern = FOV_height_air * (1 + water_depth/camera_height * (n_water/n_air - 1));
+
+% Calculate maximum displacement due to refraction
+max_slope_angle = atan(max_wave_slope);
+% Apparent displacement at pattern
+max_displacement = total_height * tan(max_slope_angle) * (n_water - n_air) / n_air;
+
+% Required pattern size (FOV + displacement buffer)
+pattern_width_needed = FOV_width_pattern + 2 * max_displacement;
+pattern_height_needed = FOV_height_pattern + 2 * max_displacement;
+
+% Spatial resolution at pattern
+spatial_resolution_x = FOV_width_pattern / pixel_width;  % cm/pixel
+spatial_resolution_y = FOV_height_pattern / pixel_height;
+
+% Print size recommendation
+fprintf('===== CISG PATTERN DESIGN RECOMMENDATIONS =====\n');
+fprintf('Camera height above water: %.1f cm\n', camera_height);
+fprintf('Water depth above pattern: %.1f cm\n', water_depth);
+fprintf('Total optical path: %.1f cm\n\n', total_height);
+
+fprintf('Field of View at pattern:\n');
+fprintf('  Width:  %.1f cm\n', FOV_width_pattern);
+fprintf('  Height: %.1f cm\n\n', FOV_height_pattern);
+
+fprintf('Spatial resolution at pattern:\n');
+fprintf('  X: %.3f cm/pixel\n', spatial_resolution_x);
+fprintf('  Y: %.3f cm/pixel\n\n', spatial_resolution_y);
+
+fprintf('Maximum expected displacement: %.2f cm\n', max_displacement);
+fprintf('Required pattern size (with margin):\n');
+fprintf('  Width:  %.1f cm\n', pattern_width_needed);
+fprintf('  Height: %.1f cm\n\n', pattern_height_needed);
+
+% Standard print sizes
+if pattern_width_needed <= 21 && pattern_height_needed <= 29.7
+    fprintf('✓ Can use A4 portrait (21 x 29.7 cm)\n');
+elseif pattern_width_needed <= 29.7 && pattern_height_needed <= 42
+    fprintf('✓ Can use A3 portrait (29.7 x 42 cm)\n');
+elseif pattern_width_needed <= 42 && pattern_height_needed <= 59.4
+    fprintf('✓ Need A2 (42 x 59.4 cm)\n');
+else
+    fprintf('⚠ Need custom large format print (%.1f x %.1f cm)\n', ...
+        pattern_width_needed, pattern_height_needed);
+end
+
+% Calculate required print DPI for adequate slope resolution
+% Rule of thumb: want at least 5 pixels per correlation window
+% Correlation window typically 16-32 pixels
+desired_pattern_resolution = spatial_resolution_x / 4;  % cm, want 4x oversampling
+required_dpi = 2.54 / desired_pattern_resolution;  % convert cm to inches
+
+fprintf('\nRecommended print resolution: %.0f DPI\n', ceil(required_dpi));
+if required_dpi > 300
+    fprintf('  ⚠ This is high! Consider increasing camera height or reducing FOV\n');
+end
+
+%% ========================================================================
+%  PART 2: GENERATE CISG PATTERN
+%% ========================================================================
+
+% Use calculated dimensions (or override for testing)
+pattern_width_cm = ceil(pattern_width_needed / 5) * 5;  % round up to nearest 5cm
+pattern_height_cm = ceil(pattern_height_needed / 5) * 5;
+dpi = max(300, ceil(required_dpi));  % use at least 300 DPI
+
+% Calculate pixel dimensions
+pattern_width_px = round(pattern_width_cm / 2.54 * dpi);
+pattern_height_px = round(pattern_height_cm / 2.54 * dpi);
+
+fprintf('\n===== GENERATING PATTERN =====\n');
+fprintf('Pattern size: %.1f x %.1f cm\n', pattern_width_cm, pattern_height_cm);
+fprintf('Pattern resolution: %d x %d pixels at %d DPI\n\n', ...
+    pattern_width_px, pattern_height_px, dpi);
+
+% Create coordinate matrices
+[X, Y] = meshgrid(1:pattern_width_px, 1:pattern_height_px);
+
+% Normalize coordinates to 0-255 range
+Red = uint8(255 * (X - 1) / (pattern_width_px - 1));      % Increases left to right
+Green = uint8(255 * (Y - 1) / (pattern_height_px - 1));   % Increases top to bottom
+Blue = uint8(128 * ones(pattern_height_px, pattern_width_px));  % Constant mid-level
+
+% Combine into RGB image
+cisg_pattern = cat(3, Red, Green, Blue);
+
+% Display pattern
+figure('Name', 'CISG Pattern');
+imshow(cisg_pattern);
+title(sprintf('CISG Pattern: %.1f x %.1f cm', pattern_width_cm, pattern_height_cm));
+xlabel('X direction (Red increases →)');
+ylabel('Y direction (Green increases ↓)');
+
+% Save pattern
+imwrite(cisg_pattern, 'CISG_pattern.png');
+imwrite(cisg_pattern, 'CISG_pattern.tif', 'Compression', 'none');
+
+%% ========================================================================
+%  PART 3: SIMULATE WAVE SURFACE AND REFRACTION
+%% ========================================================================
+
+fprintf('===== SIMULATING WAVE SURFACE =====\n');
+
+% Create a synthetic wave field
+% Simulate gravity-capillary waves
+x_wave = linspace(0, FOV_width_pattern, pixel_width);
+y_wave = linspace(0, FOV_height_pattern, pixel_height);
+[X_wave, Y_wave] = meshgrid(x_wave, y_wave);
+
+% Wave parameters (adjust for your conditions)
+wave_amplitude = 0.5;  % cm
+wave_length_x = 10;    % cm
+wave_length_y = 15;    % cm
+wave_angle = 30;       % degrees
+
+% Create wave elevation field
+k_x = 2*pi / wave_length_x;
+k_y = 2*pi / wave_length_y;
+
+% Superposition of multiple waves for realism
+eta = wave_amplitude * (...
+    sin(k_x * X_wave) + ...
+    0.7 * sin(k_y * Y_wave) + ...
+    0.5 * sin(k_x * cosd(wave_angle) * X_wave + k_y * sind(wave_angle) * Y_wave) + ...
+    0.3 * sin(2*k_x * X_wave + 1.5*k_y * Y_wave));
+
+% Calculate surface slopes
+[Sx_true, Sy_true] = gradient(eta);
+Sx_true = Sx_true / mean(diff(x_wave));  % normalize by spatial step
+Sy_true = Sy_true / mean(diff(y_wave));
+
+fprintf('Wave statistics:\n');
+fprintf('  RMS elevation: %.3f cm\n', std(eta(:)));
+fprintf('  RMS slope X: %.4f\n', std(Sx_true(:)));
+fprintf('  RMS slope Y: %.4f\n', std(Sy_true(:)));
+fprintf('  Max slope magnitude: %.4f\n', max(sqrt(Sx_true(:).^2 + Sy_true(:).^2)));
+
+%% ========================================================================
+%  PART 4: SIMULATE REFRACTION (FORWARD MODEL)
+%% ========================================================================
+
+fprintf('\n===== SIMULATING REFRACTION =====\n');
+
+% For each pixel in camera, calculate where it looks on the pattern
+% This is the forward problem: wave surface -> observed colors
+
+% Camera pixel coordinates (in cm at water surface)
+x_cam = linspace(-FOV_width_pattern/2, FOV_width_pattern/2, pixel_width);
+y_cam = linspace(-FOV_height_pattern/2, FOV_height_pattern/2, pixel_height);
+[X_cam, Y_cam] = meshgrid(x_cam, y_cam);
+
+% Calculate incident ray angles from camera to surface point
+% Assuming camera at (0, 0, camera_height) looking down
+theta_incident_x = atan(X_cam / camera_height);  % angle from vertical in x
+theta_incident_y = atan(Y_cam / camera_height);  % angle from vertical in y
+
+% Surface normal components (from slopes)
+% n = [-Sx, -Sy, 1] / sqrt(Sx^2 + Sy^2 + 1)
+norm_factor = sqrt(Sx_true.^2 + Sy_true.^2 + 1);
+n_x = -Sx_true ./ norm_factor;
+n_y = -Sy_true ./ norm_factor;
+n_z = 1 ./ norm_factor;
+
+% Apply Snell's law to get refracted ray direction
+% This is simplified - full 3D ray tracing would be more accurate
+% For small angles, the apparent displacement is:
+delta_x = water_depth * (n_water - n_air) / n_air * Sx_true;
+delta_y = water_depth * (n_water - n_air) / n_air * Sy_true;
+
+% Position on pattern that camera sees
+X_pattern = X_cam + delta_x;
+Y_pattern = Y_cam + delta_y;
+
+% Convert pattern positions to pixel indices
+% Pattern origin is at top-left (0,0) in image coordinates
+% Camera FOV is centered on pattern
+X_pattern_px = (X_pattern + pattern_width_cm/2) / pattern_width_cm * pattern_width_px;
+Y_pattern_px = (Y_pattern + pattern_height_cm/2) / pattern_height_cm * pattern_height_px;
+
+% Sample the pattern colors (with bounds checking)
+observed_image = zeros(pixel_height, pixel_width, 3, 'uint8');
+
+for i = 1:pixel_height
+    for j = 1:pixel_width
+        px = X_pattern_px(i,j);
+        py = Y_pattern_px(i,j);
+        
+        % Bounds checking
+        if px >= 1 && px <= pattern_width_px && py >= 1 && py <= pattern_height_px
+            % Bilinear interpolation
+            px1 = floor(px); px2 = ceil(px);
+            py1 = floor(py); py2 = ceil(py);
+            
+            if px2 > pattern_width_px, px2 = pattern_width_px; end
+            if py2 > pattern_height_px, py2 = pattern_height_px; end
+            
+            wx = px - px1;
+            wy = py - py1;
+            
+            for c = 1:3  % RGB channels
+                observed_image(i,j,c) = uint8(...
+                    (1-wx)*(1-wy)*double(cisg_pattern(py1,px1,c)) + ...
+                    wx*(1-wy)*double(cisg_pattern(py1,px2,c)) + ...
+                    (1-wx)*wy*double(cisg_pattern(py2,px1,c)) + ...
+                    wx*wy*double(cisg_pattern(py2,px2,c)));
+            end
+        end
+    end
+end
+
+fprintf('Refracted image generated\n');
+
+%% ========================================================================
+%  PART 5: GENERATE REFERENCE (FLAT SURFACE) IMAGE
+%% ========================================================================
+
+% For flat surface, no displacement
+X_pattern_flat = X_cam;
+Y_pattern_flat = Y_cam;
+
+X_pattern_flat_px = (X_pattern_flat + pattern_width_cm/2) / pattern_width_cm * pattern_width_px;
+Y_pattern_flat_px = (Y_pattern_flat + pattern_height_cm/2) / pattern_height_cm * pattern_height_px;
+
+reference_image = zeros(pixel_height, pixel_width, 3, 'uint8');
+
+for i = 1:pixel_height
+    for j = 1:pixel_width
+        px = X_pattern_flat_px(i,j);
+        py = Y_pattern_flat_px(i,j);
+        
+        if px >= 1 && px <= pattern_width_px && py >= 1 && py <= pattern_height_px
+            px1 = floor(px); px2 = ceil(px);
+            py1 = floor(py); py2 = ceil(py);
+            
+            if px2 > pattern_width_px, px2 = pattern_width_px; end
+            if py2 > pattern_height_px, py2 = pattern_height_px; end
+            
+            wx = px - px1;
+            wy = py - py1;
+            
+            for c = 1:3
+                reference_image(i,j,c) = uint8(...
+                    (1-wx)*(1-wy)*double(cisg_pattern(py1,px1,c)) + ...
+                    wx*(1-wy)*double(cisg_pattern(py1,px2,c)) + ...
+                    (1-wx)*wy*double(cisg_pattern(py2,px1,c)) + ...
+                    wx*wy*double(cisg_pattern(py2,px2,c)));
+            end
+        end
+    end
+end
+
+% Display images
+figure('Name', 'Observed Images');
+subplot(1,2,1);
+imshow(reference_image);
+title('Reference (Flat Surface)');
+
+subplot(1,2,2);
+imshow(observed_image);
+title('Observed (Wavy Surface)');
+
+%% ========================================================================
+%  PART 6: RECONSTRUCT SLOPES (INVERSE PROBLEM)
+%% ========================================================================
+
+fprintf('\n===== RECONSTRUCTING SLOPES =====\n');
+
+% Extract color channels
+R_obs = double(observed_image(:,:,1));
+G_obs = double(observed_image(:,:,2));
+
+R_ref = double(reference_image(:,:,1));
+G_ref = double(reference_image(:,:,2));
+
+% Calculate color displacement (in RGB units, 0-255)
+delta_R = R_obs - R_ref;
+delta_G = G_obs - G_ref;
+
+% Calibration: RGB value to physical position
+% Red spans 0-255 over pattern_width_cm
+% Green spans 0-255 over pattern_height_cm
+scale_x = pattern_width_cm / 255;   % cm per RGB unit
+scale_y = pattern_height_cm / 255;  % cm per RGB unit
+
+% Physical displacement on pattern (cm)
+delta_x_measured = delta_R * scale_x;
+delta_y_measured = delta_G * scale_y;
+
+% Convert to slopes using Snell's law (small angle approximation)
+% delta_x = H * (n_water - n_air) / n_air * Sx
+% Therefore: Sx = delta_x * n_air / ((n_water - n_air) * H)
+
+Sx_measured = delta_x_measured * n_air / ((n_water - n_air) * water_depth);
+Sy_measured = delta_y_measured * n_air / ((n_water - n_air) * water_depth);
+
+fprintf('Slopes reconstructed\n');
+
+% Calculate errors
+Sx_error = Sx_measured - Sx_true;
+Sy_error = Sy_measured - Sy_true;
+
+fprintf('\nReconstruction accuracy:\n');
+fprintf('  Sx RMS error: %.6f (%.2f%%)\n', std(Sx_error(:)), ...
+    100*std(Sx_error(:))/std(Sx_true(:)));
+fprintf('  Sy RMS error: %.6f (%.2f%%)\n', std(Sy_error(:)), ...
+    100*std(Sy_error(:))/std(Sy_true(:)));
+
+%% ========================================================================
+%  PART 7: VISUALIZATION
+%% ========================================================================
+
+figure('Name', 'Slope Comparison', 'Position', [100 100 1400 800]);
+
+% True Sx
+subplot(3,3,1);
+imagesc(x_wave, y_wave, Sx_true);
+axis equal tight; colorbar;
+title('True S_x');
+xlabel('X (cm)'); ylabel('Y (cm)');
+clim([-1 1]*max(abs(Sx_true(:))));
+colormap(gca, 'jet');
+
+% Measured Sx
+subplot(3,3,2);
+imagesc(x_wave, y_wave, Sx_measured);
+axis equal tight; colorbar;
+title('Measured S_x');
+xlabel('X (cm)'); ylabel('Y (cm)');
+clim([-1 1]*max(abs(Sx_true(:))));
+colormap(gca, 'jet');
+
+% Error Sx
+subplot(3,3,3);
+imagesc(x_wave, y_wave, Sx_error);
+axis equal tight; colorbar;
+title('Error S_x');
+xlabel('X (cm)'); ylabel('Y (cm)');
+colormap(gca, 'jet');
+
+% True Sy
+subplot(3,3,4);
+imagesc(x_wave, y_wave, Sy_true);
+axis equal tight; colorbar;
+title('True S_y');
+xlabel('X (cm)'); ylabel('Y (cm)');
+clim([-1 1]*max(abs(Sy_true(:))));
+colormap(gca, 'jet');
+
+% Measured Sy
+subplot(3,3,5);
+imagesc(x_wave, y_wave, Sy_measured);
+axis equal tight; colorbar;
+title('Measured S_y');
+xlabel('X (cm)'); ylabel('Y (cm)');
+clim([-1 1]*max(abs(Sy_true(:))));
+colormap(gca, 'jet');
+
+% Error Sy
+subplot(3,3,6);
+imagesc(x_wave, y_wave, Sy_error);
+axis equal tight; colorbar;
+title('Error S_y');
+xlabel('X (cm)'); ylabel('Y (cm)');
+colormap(gca, 'jet');
+
+% Wave elevation
+subplot(3,3,7);
+imagesc(x_wave, y_wave, eta);
+axis equal tight; colorbar;
+title('Wave Elevation (cm)');
+xlabel('X (cm)'); ylabel('Y (cm)');
+colormap(gca, 'jet');
+
+% Slope magnitude comparison
+slope_mag_true = sqrt(Sx_true.^2 + Sy_true.^2);
+slope_mag_meas = sqrt(Sx_measured.^2 + Sy_measured.^2);
+
+subplot(3,3,8);
+plot(slope_mag_true(:), slope_mag_meas(:), '.');
+hold on;
+plot([0 max(slope_mag_true(:))], [0 max(slope_mag_true(:))], 'r--');
+xlabel('True Slope Magnitude');
+ylabel('Measured Slope Magnitude');
+title('Slope Magnitude Comparison');
+axis equal;
+grid on;
+
+% Error histogram
+subplot(3,3,9);
+histogram(Sx_error(:), 50, 'Normalization', 'pdf');
+hold on;
+histogram(Sy_error(:), 50, 'Normalization', 'pdf');
+xlabel('Slope Error');
+ylabel('PDF');
+legend('S_x error', 'S_y error');
+title('Error Distribution');
+grid on;
+
+%% ========================================================================
+%  PART 8: SAVE RESULTS
+%% ========================================================================
+
+% Save design parameters
+design_params = struct(...
+    'camera_height', camera_height, ...
+    'water_depth', water_depth, ...
+    'pattern_width_cm', pattern_width_cm, ...
+    'pattern_height_cm', pattern_height_cm, ...
+    'dpi', dpi, ...
+    'FOV_width', FOV_width_pattern, ...
+    'FOV_height', FOV_height_pattern, ...
+    'spatial_resolution_x', spatial_resolution_x, ...
+    'spatial_resolution_y', spatial_resolution_y, ...
+    'n_air', n_air, ...
+    'n_water', n_water);
+
+save('CISG_design_params.mat', 'design_params');
+
+% Save test images
+imwrite(reference_image, 'CISG_reference_image.png');
+imwrite(observed_image, 'CISG_observed_image.png');
+
+% Save results
+save('CISG_simulation_results.mat', 'Sx_true', 'Sy_true', ...
+    'Sx_measured', 'Sy_measured', 'eta', 'x_wave', 'y_wave');
+
+fprintf('\n===== COMPLETE =====\n');Chec
+fprintf('Files saved:\n');
+fprintf('  - CISG_pattern.png/tif (print this!)\n');
+fprintf('  - CISG_design_params.mat\n');
+fprintf('  - CISG_simulation_results.mat\n');
+fprintf('  - CISG_reference_image.png\n');
+fprintf('  - CISG_observed_image.png\n');
+
+
+%Pattern Width = FOV + 2 × Max_Displacement
+
+%
+%FOV ≈ 2 × (H_cam + H_water) × tan(α/2)
+%Max_Displacement ≈ H_water × (n_water - n_air) / n_air × max_slope
