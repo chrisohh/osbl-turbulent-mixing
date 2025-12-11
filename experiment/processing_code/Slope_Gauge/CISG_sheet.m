@@ -2,9 +2,9 @@
 % Creates a unique RGB color at each pixel position
 
 % Calculate pixels needed for specific print size
-print_width_cm = 29.7;  % A3 width in cm
-print_height_cm = 42.0; % A3 height in cm
-dpi = 300;              % Print resolution
+print_width_cm = 20*2.54;  % A3 width in cm
+print_height_cm = 20*2.54; % A3 height in cm
+dpi = 600;              % Print resolution
 
 width = round(print_width_cm / 2.54 * dpi);
 height = round(print_height_cm / 2.54 * dpi);
