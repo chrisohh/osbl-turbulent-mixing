@@ -2,13 +2,13 @@
 % Chris - SOARS Lab
 % Start simple: just wave gauge + external trigger
 
-clear; clc;
+clear; clc; close all;
 
 %% ==================== SIMPLE CONFIGURATION ====================
 
 % Wave Gauge Settings
 SAMPLE_RATE = 1000;              % Hz (1 kHz is plenty for waves)
-DURATION = 600;                   % seconds
+DURATION = 60;                   % seconds
 WAVEGAUGE_CHANNEL = 'ai7';       % Wave gauge connected to AI0
 WAVEGAUGE_CALIBRATION = 0.2;     % V/cm (from amplifier)
 
@@ -97,7 +97,7 @@ time = (0:height(data)-1)' / SAMPLE_RATE;
 voltage = data.Variables;
 
 % Convert to wave height (cm)
-still_water_voltage = 0;%mean(voltage(1:min(100, length(voltage))));
+still_water_voltage = mean(voltage(1:min(100, length(voltage))));
 wave_height_cm = (voltage - still_water_voltage) / WAVEGAUGE_CALIBRATION;
 
 
