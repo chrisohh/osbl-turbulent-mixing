@@ -1,7 +1,7 @@
 clear all; close all;
 
 %Read CR6 TOA5 data files from Gill R3-50 and concatenate
-dirin = 'C:\Campbellsci\LoggerNet\';
+dirin = 'H:\';
 files = dir([dirin '*.dat']);
 allTables = cell(1, length(files));
 
