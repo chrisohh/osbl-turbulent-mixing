@@ -1,2 +1,7 @@
 experiment/processing_code/Wave_Gauge/CISG_pattern.tif
 experiment/processing_code/Wave_Gauge/CISG_pattern.png
+experiment/processing_code/Wave_Gauge/vaisala_wind_10cmFresh_49cmSalt.mat
+*.mat
+*.png
+*.tif
+experiment/processing_code/SOARS/wind_speed_profile.csv
