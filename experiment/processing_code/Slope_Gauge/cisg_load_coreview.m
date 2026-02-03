@@ -85,8 +85,8 @@ function [rgb_image, metadata] = cisg_load_coreview(filename)
     % Reorder to RGB: [R G B] = [channel2 channel1 channel3]
     rgb_image = rgb_image(:,:,[2 3 1]);  % Swap first two channels (GBR → RGB)
     
-    fprintf('  RGB image: %d x %d x 3\n', size(rgb_image,1), size(rgb_image,2));
-    fprintf('  Loaded successfully\n');
+    % fprintf('  RGB image: %d x %d x 3\n', size(rgb_image,1), size(rgb_image,2));
+    % fprintf('  Loaded successfully\n');
     
     % Quick visualization check
     % figure; imshow(rgb_image); title(filename);
