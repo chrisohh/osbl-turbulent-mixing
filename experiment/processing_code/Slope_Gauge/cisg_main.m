@@ -68,9 +68,43 @@ colormap(gca, 'gray');
 
 fprintf('Reference image loaded: %d x %d\n\n', size(ref_image,1), size(ref_image,2));
 
+%% find where to crop from the reference image
+% Define valid region - click 4 corners on reference
+figure('Name', 'Select valid region - Click 4 corners', 'Position', [100 100 1200 800]);
+imshow(ref_image);
+title('Click 4 corners of valid region (any order)');
+
+fprintf('Click 4 corners...\n');
+[cx, cy] = ginput(4);
+
+% Sort points into left/right and top/bottom
+% Left side: 2 points with smallest x, right side: 2 with largest x
+[cx_sorted, idx] = sort(cx);
+left_pts = idx(1:2);   % two leftmost
+right_pts = idx(3:4);  % two rightmost
+
+col_min = ceil(max(cx(left_pts)));    % rightmost of the left points
+col_max = floor(min(cx(right_pts)));  % leftmost of the right points
+
+[cy_sorted, idx] = sort(cy);
+top_pts = idx(1:2);    % two smallest y (top of image)
+bottom_pts = idx(3:4); % two largest y (bottom of image)
+
+row_min = ceil(max(cy(top_pts)));     % lowest of the top points
+row_max = floor(min(cy(bottom_pts))); % highest of the bottom points
+
+setup.roi = struct('row_min', row_min, 'row_max', row_max, ...
+    'col_min', col_min, 'col_max', col_max);
+
+% Create mask
+setup.valid_mask = false(img_height, img_width);
+setup.valid_mask(row_min:row_max, col_min:col_max) = true;
+
+fprintf('  ROI: rows [%d, %d], cols [%d, %d]\n', row_min, row_max, col_min, col_max);
+
 %% Process frames
-totalFrames = 1415;
-start_frame = 1;
+totalFrames = 2291;
+start_frame = 1421;
 end_frame = totalFrames;
 frames_to_process = start_frame:10:end_frame;
 nFrames = length(frames_to_process);
@@ -80,22 +114,22 @@ time = (frames_to_process - 1) * dt;
 fprintf('===== PROCESSING FRAMES %d to %d (%d frames) =====\n', start_frame, end_frame, nFrames);
 
 % Write directly to disk
-mat_fileName = sprintf('CISG_slopes_CoreView_%d.mat', coreview_num);
-m = matfile(mat_fileName, 'Writable', true);
+% mat_fileName = sprintf('CISG_slopes_CoreView_%d.mat', coreview_num);
+% m = matfile(mat_fileName, 'Writable', true);
 % initialize zeros with 2 pages to force it to recognize 3D matrix
-m.Sx = zeros(img_height, img_width, 2, 'single');
-m.Sy = zeros(img_height, img_width, 2, 'single');
+% m.Sx = zeros(img_height, img_width, 2, 'single');
+% m.Sy = zeros(img_height, img_width, 2, 'single');
 
 tic;
 for count = 1:nFrames
     n = frames_to_process(count);
     obs_fileName = sprintf("CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw", coreview_num, n);
-    [obs_image, ~] = cisg_load_coreview(strcat(obs_folderName, obs_fileName));
+    [obs_image, ~] = cisg_load_coreview(strcat(sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\CoreView_%d\\Flare 12M125 CCL C1112A00\\", coreview_num,coreview_num), obs_fileName));
     
     [sx, sy] = cisg_calculate_slopes(ref_image, obs_image, setup);
 
-    m.Sx(:,:,count) = single(sx);
-    m.Sy(:,:,count) = single(sy);
+    m.Sx(:,:,count+142) = single(sx);
+    m.Sy(:,:,count+142) = single(sy);
    
     if mod(count, 10) == 0
         elapsed = toc;
@@ -143,53 +177,61 @@ fprintf('  Saved: %s\n\n', mat_fileName);
 % fprintf('  Average speed: %.1f fps\n', totalFrames/total_time);
 
 %% Save results
-fprintf('\n===== SAVING RESULTS =====\n');
-save('CISG_slopes_all_frames.mat', 'Sx', 'Sy', 'time', 'setup', '-v7.3');
-fprintf('Saved: CISG_slopes_all_frames.mat\n');
-
-% Save metadata
-fid = fopen('CISG_processing_info.txt', 'w');
-fprintf(fid, 'CISG Processing Summary\n');
-fprintf(fid, '======================\n\n');
-fprintf(fid, 'Data folder: %s\n', ref_folderName);
-fprintf(fid, 'Reference file: %s\n', ref_fileName);
-fprintf(fid, 'Total frames: %d\n', totalFrames);
-fprintf(fid, 'Frame rate: %d Hz\n', fs);
-fprintf(fid, 'Duration: %.2f seconds\n', totalFrames * dt);
-fprintf(fid, 'Image size: %d x %d\n', height, width);
-fprintf(fid, 'Camera height: %.1f cm\n', setup.camera_height);
-fprintf(fid, 'Water depth: %.1f cm\n', setup.water_depth);
-% fprintf(fid, 'Pattern size: %.1f x %.1f cm\n', setup.pattern_width_cm, setup.pattern_height_cm);
-fprintf(fid, 'Processing time: %.1f seconds\n', total_time);
-fclose(fid);
-fprintf('Saved: CISG_processing_info.txt\n');
+% fprintf('\n===== SAVING RESULTS =====\n');
+% save('CISG_slopes_frame1to1415_increment10.mat', 'Sx', 'Sy', 'time', 'setup', '-v7.3');
+% fprintf('Saved: CISG_slopes_all_frames.mat\n');
+% 
+% % Save metadata
+% fid = fopen('CISG_processing_info.txt', 'w');
+% fprintf(fid, 'CISG Processing Summary\n');
+% fprintf(fid, '======================\n\n');
+% fprintf(fid, 'Data folder: %s\n', ref_folderName);
+% fprintf(fid, 'Reference file: %s\n', ref_fileName);
+% fprintf(fid, 'Total frames: %d\n', totalFrames);
+% fprintf(fid, 'Frame rate: %d Hz\n', fs);
+% fprintf(fid, 'Duration: %.2f seconds\n', totalFrames * dt);
+% fprintf(fid, 'Image size: %d x %d\n', height, width);
+% fprintf(fid, 'Camera height: %.1f cm\n', setup.camera_height);
+% fprintf(fid, 'Water depth: %.1f cm\n', setup.water_depth);
+% % fprintf(fid, 'Pattern size: %.1f x %.1f cm\n', setup.pattern_width_cm, setup.pattern_height_cm);
+% fprintf(fid, 'Processing time: %.1f seconds\n', total_time);
+% fclose(fid);
+% fprintf('Saved: CISG_processing_info.txt\n');
 
 %% Quick visualization of results
 fprintf('\n===== VISUALIZING SAMPLE FRAMES =====\n');
 
 figure('Name', 'Spatial Maps', 'Position', [100 100 1600 1000]);
-tiledlayout(3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+tiledlayout(1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 
-frames_to_show = [1, round(size(Sx,3)/2), size(Sx,3)];
+frames_to_show = [141];%[1, round(size(m.Sx,3)/2), size(m.Sx,3)];
+
+% Physical axes centered on ROI center
+nx = setup.roi.col_max - setup.roi.col_min + 1;
+ny = setup.roi.row_max - setup.roi.row_min + 1;
+x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
+y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
 
 for i = 1:length(frames_to_show)
-    frame_num = frames_to_show(i);
+    Sx_frame = double(m.Sx(setup.roi.row_min:setup.roi.row_max, ...
+                           setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
-    imagesc(Sx(:,:,i));
+    imagesc(x_cm, y_cm, Sx_frame);
     axis equal tight; colorbar;
-    title(sprintf('S_x: Frame %d (t=%.2fs)', frame_num, time(frame_num)));
+    title(sprintf('S_x: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
     colormap(gca, 'turbo');
     caxis([-0.2,0.2]);
 end
 
 for i = 1:length(frames_to_show)
-    frame_num = frames_to_show(i);
+    Sy_frame = double(m.Sy(setup.roi.row_min:setup.roi.row_max, ...
+                           setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
-    imagesc(Sy(:,:,i));
+    imagesc(x_cm, y_cm, Sy_frame);
     axis equal tight; colorbar;
-    title(sprintf('S_y: Frame %d', frame_num));
+    title(sprintf('S_y: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
     colormap(gca, 'turbo');
     caxis([-0.2,0.2]);
 end
@@ -197,11 +239,14 @@ end
 
 for i = 1:length(frames_to_show)
     frame_num = frames_to_show(i);
-    Smag = sqrt(Sx(:,:,i).^2 + Sy(:,:,i).^2);
+    Smag = sqrt(double(m.Sx(:,:,frames_to_show(i))).^2 + double(m.Sy(:,:,frames_to_show(i))).^2);
+    Smag = Smag(setup.roi.row_min:setup.roi.row_max, ...
+                           setup.roi.col_min:setup.roi.col_max);
+    
     nexttile;
-    imagesc(Smag);
+    imagesc(x_cm, y_cm, Smag);
     axis equal tight; colorbar;
-    title(sprintf('|S|: Frame %d', frame_num));
+    title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
     colormap(gca, 'hot');
     caxis([0,0.2]);
 end
@@ -261,3 +306,26 @@ fprintf('  - Sx: [%d x %d x %d] slope array\n', height, width, totalFrames);
 fprintf('  - Sy: [%d x %d x %d] slope array\n', height, width, totalFrames);
 fprintf('  - time: [%d x 1] time vector (seconds)\n', totalFrames);
 fprintf('  - setup: struct with experimental parameters\n');
+
+%% Compute (ak)^2 time series
+ak2_Sx = zeros(1, nFrames);
+ak2_Sy = zeros(1, nFrames);
+
+for i = 1:nFrames
+    Sx_frame = double(m.Sx(setup.roi.row_min:setup.roi.row_max, ...
+        setup.roi.col_min:setup.roi.col_max, i));
+    Sy_frame = double(m.Sy(setup.roi.row_min:setup.roi.row_max, ...
+        setup.roi.col_min:setup.roi.col_max, i));
+    ak2_Sx(i) = mean(Sx_frame(:).^2);
+    ak2_Sy(i) = mean(Sy_frame(:).^2);
+    ak2_Smag(i) = mean(Smag(:).^2);
+end
+
+figure('Name', 'Mean Square Slope Evolution');
+plot(time, ak2_Sx,'LineWidth',1.5); hold on;
+plot(time, ak2_Sy,'LineWidth',1.5);
+plot(time, ak2_Smag, '--k','LineWidth',1.5);
+xlabel('Time (s)');
+ylabel('$(ak)^2$', 'Interpreter', 'latex');
+legend('S_x', 'S_y', '|S|');
+grid off;
