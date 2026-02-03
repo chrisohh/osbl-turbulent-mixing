@@ -204,7 +204,7 @@ fprintf('\n===== VISUALIZING SAMPLE FRAMES =====\n');
 figure('Name', 'Spatial Maps', 'Position', [100 100 1600 1000]);
 tiledlayout(1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 
-frames_to_show = [141];%[1, round(size(m.Sx,3)/2), size(m.Sx,3)];
+frames_to_show = [228];%[1, round(size(m.Sx,3)/2), size(m.Sx,3)];
 
 % Physical axes centered on ROI center
 nx = setup.roi.col_max - setup.roi.col_min + 1;
@@ -248,7 +248,7 @@ for i = 1:length(frames_to_show)
     axis equal tight; colorbar;
     title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
     colormap(gca, 'hot');
-    caxis([0,0.2]);
+    caxis([0,0.3]);
 end
 
 %% Make a video
@@ -308,6 +308,7 @@ fprintf('  - time: [%d x 1] time vector (seconds)\n', totalFrames);
 fprintf('  - setup: struct with experimental parameters\n');
 
 %% Compute (ak)^2 time series
+nFrames=length(1:10:end_frame);
 ak2_Sx = zeros(1, nFrames);
 ak2_Sy = zeros(1, nFrames);
 
@@ -318,7 +319,6 @@ for i = 1:nFrames
         setup.roi.col_min:setup.roi.col_max, i));
     ak2_Sx(i) = mean(Sx_frame(:).^2);
     ak2_Sy(i) = mean(Sy_frame(:).^2);
-    ak2_Smag(i) = mean(Smag(:).^2);
 end
 
 figure('Name', 'Mean Square Slope Evolution');
@@ -329,3 +329,4 @@ xlabel('Time (s)');
 ylabel('$(ak)^2$', 'Interpreter', 'latex');
 legend('S_x', 'S_y', '|S|');
 grid off;
+set(gca,'fontsize',12)
