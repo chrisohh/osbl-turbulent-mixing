@@ -1,0 +1,272 @@
+load("\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000017_f3705.mat")
+figure;
+imagesc(Frame)
+
+%%
+% Initialize parameters
+file_numbers = 2876:2886;
+num_files = length(file_numbers);
+file_path='\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000017_background\';
+% Load first file to get dimensions
+first_file = sprintf('Rec-000017_%d.mat', file_numbers(1));
+data = load(strcat(file_path,first_file));
+img_sum = double(data.Frame);  % Convert to double for accuracy
+
+% Loop through remaining files and accumulate
+for i = 2:num_files
+    filename = sprintf('Rec-000017_%d.mat', file_numbers(i));
+    data = load(strcat(file_path,filename));
+    img_sum = img_sum + double(data.Frame);
+end
+
+% Compute time average
+img_avg = img_sum / num_files;
+
+% Display result
+figure;
+imagesc(img_avg);
+colorbar;
+title('Time-Averaged Image');
+axis equal tight;
+%%
+mask = img_avg < 18.6;
+
+%%
+masked_data=(Frame-img_avg).*mask;
+masked_data(~mask) = NaN;  % Set false regions to NaN
+figure;
+imagesc(masked_data);
+colormap('hot')
+colorbar
+clim([-0.2,0.2])
+xlabel('')
+
+%%
+% Threshold to find walls (adjust based on your image)
+wallTemp = 18.5;  % or whatever temp the walls are at
+tolerance = 0.1;  % degrees
+
+wallMask = abs(Frame - wallTemp) < tolerance;
+
+figure;
+imagesc(wallMask);
+colormap(gray);
+title('Wall detection mask');
+
+% Find edges
+edges = edge(wallMask, 'Canny');
+
+% Extract left and right edges
+% This is a simplified version - you may need to refine
+figure;
+imagesc(edges);
+title('Detected edges - verify walls are captured');
+
+%% Step 2: Identify left and right walls
+% Assume walls are the leftmost and rightmost continuous edges
+% For each row, find the leftmost and rightmost edge pixels
+
+leftWall_x = nan(512, 1);
+leftWall_y = (1:512)';
+rightWall_x = nan(512, 1);
+rightWall_y = (1:512)';
+
+for row = 1:512
+    edgePixels = find(edges(row, :));
+    
+    if ~isempty(edgePixels)
+        % Left wall is the leftmost edge in this row
+        leftWall_x(row) = edgePixels(1);
+        % Right wall is the rightmost edge in this row
+        rightWall_x(row) = edgePixels(end);
+    end
+end
+
+% Remove NaN values (rows where no edges were detected)
+validLeft = ~isnan(leftWall_x);
+validRight = ~isnan(rightWall_x);
+
+x_left = leftWall_x(validLeft);
+y_left = leftWall_y(validLeft);
+x_right = rightWall_x(validRight);
+y_right = rightWall_y(validRight);
+
+% Plot detected wall points
+subplot(2,3,3);
+imagesc(Frame);
+colormap(hot);
+colorbar;
+hold on;
+plot(x_left, y_left, 'g.', 'MarkerSize', 3);
+plot(x_right, y_right, 'b.', 'MarkerSize', 3);
+axis equal tight;
+title('Detected wall points');
+legend('Left wall', 'Right wall');
+
+%% Step 3: Filter outliers using robust fitting
+% Remove obvious outliers before fitting
+
+% For left wall - remove points too far from median
+median_left = median(x_left);
+mad_left = median(abs(x_left - median_left)); % Median absolute deviation
+outliers_left = abs(x_left - median_left) > 3 * mad_left;
+x_left_clean = x_left(~outliers_left);
+y_left_clean = y_left(~outliers_left);
+
+% For right wall
+median_right = median(x_right);
+mad_right = median(abs(x_right - median_right)); 
+outliers_right = abs(x_right - median_right) > 3 * mad_right;
+x_right_clean = x_right(~outliers_right);
+y_right_clean = y_right(~outliers_right);
+
+fprintf('Left wall: %d points, %d outliers removed\n', length(x_left), sum(outliers_left));
+fprintf('Right wall: %d points, %d outliers removed\n', length(x_right), sum(outliers_right));
+
+%% Step 4: Fit polynomial curves to walls
+% Higher polynomial order captures barrel/pincushion distortion
+polyOrder = 2;  % Start with 5th order, adjust if needed
+
+% Fit left wall: x as function of y
+p_left = polyfit(y_left_clean, x_left_clean, polyOrder);
+
+% Fit right wall: x as function of y
+p_right = polyfit(y_right_clean, x_right_clean, polyOrder);
+
+% Evaluate fitted curves
+y_eval = 1:512;
+x_left_fit = polyval(p_left, y_eval);
+x_right_fit = polyval(p_right, y_eval);
+
+% Plot fitted curves
+subplot(2,3,4);
+imagesc(Frame);
+colormap(hot);
+colorbar;
+hold on;
+plot(x_left_clean, y_left_clean, 'g.', 'MarkerSize', 3);
+plot(x_right_clean, y_right_clean, 'b.', 'MarkerSize', 3);
+plot(x_left_fit, y_eval, 'g-', 'LineWidth', 3);
+plot(x_right_fit, y_eval, 'b-', 'LineWidth', 3);
+axis equal tight;
+title(sprintf('Fitted walls (order %d)', polyOrder));
+legend('Left points', 'Right points', 'Left fit', 'Right fit');
+
+
+%% Step 5: Analyze distortion
+% Plot wall separation vs. y position to see distortion pattern
+wall_separation = x_right_fit - x_left_fit;
+mean_separation = mean(wall_separation);
+distortion_percent = 100 * (wall_separation - mean_separation) / mean_separation;
+
+figure('Position', [100 100 800 400]);
+subplot(1,2,1);
+plot(y_eval, wall_separation, 'k-', 'LineWidth', 2);
+hold on;
+plot(y_eval, mean_separation * ones(size(y_eval)), 'r--', 'LineWidth', 2);
+xlabel('Y position (pixels)');
+ylabel('Wall separation (pixels)');
+title('Distortion analysis');
+legend('Actual separation', 'Mean separation');
+grid on;
+
+subplot(1,2,2);
+plot(y_eval, distortion_percent, 'k-', 'LineWidth', 2);
+xlabel('Y position (pixels)');
+ylabel('Distortion (%)');
+title('Relative distortion from mean');
+grid on;
+yline(0, 'r--');
+
+fprintf('\nDistortion statistics:\n');
+fprintf('Mean wall separation: %.2f pixels\n', mean_separation);
+fprintf('Max distortion: %.2f%% (%.2f pixels)\n', ...
+    max(abs(distortion_percent)), max(abs(wall_separation - mean_separation)));
+
+%% Step 6: Create undistorted coordinate mapping
+% Known channel width
+channelWidth = 0.5;  % meters
+
+[pixelY, pixelX] = meshgrid(1:512, 1:640);
+pixelY = pixelY';
+pixelX = pixelX';
+
+% Initialize physical coordinate arrays
+physicalX = zeros(size(pixelX));
+physicalY = zeros(size(pixelY));
+
+% For each row (along-wind position)
+for row = 1:512
+    % Get wall positions at this row
+    x_left_row = polyval(p_left, row);
+    x_right_row = polyval(p_right, row);
+
+    % Current pixel width between walls
+    pixel_width = x_right_row - x_left_row;
+
+    % Map pixel positions to physical cross-wind positions
+    % Left wall = -0.25 m, Right wall = +0.25 m
+    for col = 1:640
+        % Normalize position between walls (0 to 1)
+        normalized_pos = (col - x_left_row) / pixel_width;
+
+        % Map to physical cross-wind position
+        physicalX(row, col) = (normalized_pos - 0.5) * channelWidth;
+    end
+end
+
+% Scale Y direction
+% Use average pixel spacing across channel
+pixelsPerMeter_x = mean_separation / channelWidth;
+
+% Assume square pixels in physical space
+pixelsPerMeter_y = pixelsPerMeter_x;
+physicalY = (pixelY - 256) / pixelsPerMeter_y;  % Center at middle row
+
+fprintf('\nSpatial calibration:\n');
+fprintf('Average pixels across channel: %.2f pixels\n', mean_separation);
+fprintf('X resolution: %.3f mm/pixel\n', 1000 * channelWidth / mean_separation);
+fprintf('Y resolution: %.3f mm/pixel (assuming square pixels)\n', 1000 / pixelsPerMeter_y);
+
+%% Step 7: Create regular grid and interpolate
+% Create regular physical grid
+x_regular = linspace(-channelWidth/2, channelWidth/2, 640);  % -0.25 to +0.25 m
+y_range = max(physicalY(:)) - min(physicalY(:));
+y_regular = linspace(min(physicalY(:)), max(physicalY(:)), 512);
+
+[X_regular, Y_regular] = meshgrid(x_regular, y_regular);
+
+fprintf('\nPhysical domain after correction:\n');
+fprintf('X: %.3f m (%.1f cm) - cross-wind\n', channelWidth, channelWidth*100);
+fprintf('Y: %.3f m (%.1f cm) - along-wind\n', y_range, y_range*100);
+fprintf('Aspect ratio: %.3f\n', y_range / channelWidth);
+
+% Interpolate onto regular grid
+frameData_corrected = griddata(physicalX, physicalY, masked_data, ...
+    X_regular, Y_regular, 'linear');
+
+%% Step 8: Visualize correction
+figure('Position', [100 100 1400 600]);
+
+subplot(1,2,1);
+imagesc(masked_data);
+colormap(hot);
+colorbar;
+axis equal tight;
+hold on;
+plot(x_left_fit, y_eval, 'b-', 'LineWidth', 2);
+plot(x_right_fit, y_eval, 'b-', 'LineWidth', 2);
+title('Original');
+xlabel('Pixel X');
+ylabel('Pixel Y');
+legend('Wall outline');
+clim([-0.2,0.2])
+subplot(1,2,2);
+imagesc(x_regular*100, y_regular*100, frameData_corrected);
+colormap(hot);
+colorbar;
+axis equal tight;
+title('Distortion corrected');
+xlabel('Cross-wind (cm)');
+ylabel('Along-wind (cm)');
+clim([-0.2,0.2])
