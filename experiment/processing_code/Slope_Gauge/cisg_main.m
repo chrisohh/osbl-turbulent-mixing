@@ -4,9 +4,9 @@ clear all;
 %% Setup parameters
 coreview_num = 22;
 coreview_ref_num = 19;%coreview_num
-ref_fileName= sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_01.raw", coreview_ref_num,coreview_ref_num);
+ref_fileName= sprintf('Y:\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_01.raw', coreview_ref_num,coreview_ref_num);
 
-obs_folderName = sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\", coreview_num);
+obs_folderName = sprintf('Y:\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\', coreview_num);
 fs = 50;  % Hz
 dt = 1/fs;  % 0.02 seconds between frames
 
@@ -104,7 +104,7 @@ fprintf('  ROI: rows [%d, %d], cols [%d, %d]\n', row_min, row_max, col_min, col_
 
 %% Process frames
 totalFrames = 2291;
-start_frame = 1421;
+start_frame = 1;
 end_frame = totalFrames;
 frames_to_process = start_frame:10:end_frame;
 nFrames = length(frames_to_process);
@@ -114,22 +114,22 @@ time = (frames_to_process - 1) * dt;
 fprintf('===== PROCESSING FRAMES %d to %d (%d frames) =====\n', start_frame, end_frame, nFrames);
 
 % Write directly to disk
-% mat_fileName = sprintf('CISG_slopes_CoreView_%d.mat', coreview_num);
-% m = matfile(mat_fileName, 'Writable', true);
+mat_fileName = sprintf('CISG_slopes_CoreView_%d.mat', coreview_num);
+m = matfile(mat_fileName, 'Writable', true);
 % initialize zeros with 2 pages to force it to recognize 3D matrix
-% m.Sx = zeros(img_height, img_width, 2, 'single');
-% m.Sy = zeros(img_height, img_width, 2, 'single');
+m.Sx = zeros(img_height, img_width, 2, 'single');
+m.Sy = zeros(img_height, img_width, 2, 'single');
 
 tic;
 for count = 1:nFrames
     n = frames_to_process(count);
     obs_fileName = sprintf("CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw", coreview_num, n);
-    [obs_image, ~] = cisg_load_coreview(strcat(sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\CoreView_%d\\Flare 12M125 CCL C1112A00\\", coreview_num,coreview_num), obs_fileName));
+    [obs_image, ~] = cisg_load_coreview(strcat(obs_folderName, obs_fileName));
     
     [sx, sy] = cisg_calculate_slopes(ref_image, obs_image, setup);
 
-    m.Sx(:,:,count+142) = single(sx);
-    m.Sy(:,:,count+142) = single(sy);
+    m.Sx(:,:,count) = single(sx);
+    m.Sy(:,:,count) = single(sy);
    
     if mod(count, 10) == 0
         elapsed = toc;
@@ -199,6 +199,7 @@ fprintf('  Saved: %s\n\n', mat_fileName);
 % fprintf('Saved: CISG_processing_info.txt\n');
 
 %% Quick visualization of results
+addpath('D:\Strat_local\Experiment\')
 fprintf('\n===== VISUALIZING SAMPLE FRAMES =====\n');
 
 figure('Name', 'Spatial Maps', 'Position', [100 100 1600 1000]);
@@ -207,8 +208,8 @@ tiledlayout(1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 frames_to_show = [228];%[1, round(size(m.Sx,3)/2), size(m.Sx,3)];
 
 % Physical axes centered on ROI center
-nx = setup.roi.col_max - setup.roi.col_min + 1;
-ny = setup.roi.row_max - setup.roi.row_min + 1;
+nx = img_width;
+ny = img_height;
 x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
 y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
 
@@ -220,7 +221,7 @@ for i = 1:length(frames_to_show)
     imagesc(x_cm, y_cm, Sx_frame);
     axis equal tight; colorbar;
     title(sprintf('S_x: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'turbo');
+    colormap(gca, 'redblue');
     caxis([-0.2,0.2]);
 end
 
@@ -232,35 +233,100 @@ for i = 1:length(frames_to_show)
     imagesc(x_cm, y_cm, Sy_frame);
     axis equal tight; colorbar;
     title(sprintf('S_y: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'turbo');
+    colormap(gca, 'redblue');
     caxis([-0.2,0.2]);
 end
 
 
-for i = 1:length(frames_to_show)
-    frame_num = frames_to_show(i);
-    Smag = sqrt(double(m.Sx(:,:,frames_to_show(i))).^2 + double(m.Sy(:,:,frames_to_show(i))).^2);
-    Smag = Smag(setup.roi.row_min:setup.roi.row_max, ...
-                           setup.roi.col_min:setup.roi.col_max);
-    
-    nexttile;
-    imagesc(x_cm, y_cm, Smag);
-    axis equal tight; colorbar;
-    title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'hot');
-    caxis([0,0.3]);
-end
+% for i = 1:length(frames_to_show)
+%     frame_num = frames_to_show(i);
+%     Smag = sqrt(double(m.Sx(:,:,frames_to_show(i))).^2 + double(m.Sy(:,:,frames_to_show(i))).^2);
+%     Smag = Smag(setup.roi.row_min:setup.roi.row_max, ...
+%                            setup.roi.col_min:setup.roi.col_max);
+% 
+%     nexttile;
+%     imagesc(x_cm, y_cm, Smag);
+%     axis equal tight; colorbar;
+%     title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
+%     colormap(gca, 'hot');
+%     caxis([0,0.3]);
+% end
 
-%% Make a video
+%% Make a video with memory-efficient loading
+
+%% Load and view a single frame from the matfile
+
+folderName = 'Y:\HLAB_2026\SlopeGauge\Processed\';
+coreview_num = 22;
+mat_fileName = strcat(folderName, sprintf('CISG_slopes_CoreView_%d.mat', coreview_num));
+
+% Connect to matfile WITHOUT loading all data
+m = matfile(mat_fileName);
+
+% Check dimensions
+[img_height, img_width, nFrames] = size(m, 'Sx');
+fprintf('Data dimensions: %d x %d x %d frames\n', img_height, img_width, nFrames);
+
+
+
+%% Visualize the single frame
+addpath('D:\Strat_local\Experiment\')
+% Load just ONE frame (e.g., frame 500)
+frame_num = 228;
+Sx_single = m.Sx(:, :, frame_num);
+Sy_single = m.Sy(:, :, frame_num);
+time_single = m.time(1, frame_num);
+% Load just ONE frame (e.g., frame 500)
+% frame_num = 10;
+% Sx_single = Sx(:, :, frame_num);
+% Sy_single = Sy(:, :, frame_num);
+% time_single = time(1, frame_num);
+%%
+figure('Position', [100 100 1400 600], 'Color', 'white');
+
+% Sx plot
+subplot(1,2,1)
+imagesc(x_cm, y_cm,Sx_single);
+axis equal tight;
+colorbar;
+colormap(gca, 'redblue');
+caxis([-0.2, 0.2]);
+title(sprintf('S_x at t = %.3f s', (frame_num-1)*dt*10);
+xlabel('X (pixels)');
+ylabel('Y (pixels)');
+
+% Sy plot
+subplot(1,2,2)
+imagesc(x_cm, y_cm,Sy_single);
+axis equal tight;
+colorbar;
+colormap(gca, 'redblue');
+caxis([-0.2, 0.2]);
+title(sprintf('S_y at t = %.3f s', time_single));
+xlabel('X (pixels)');
+ylabel('Y (pixels)');
+
+%% Then, if you like what you see, create video for a range
+
+% Define your frame range
+frame_range = 1:length(time);  % or whatever range you want
+
+fprintf('Loading frames %d to %d...\n', frame_range(1), frame_range(end));
+Sx_subset = Sx(:, :, frame_range);
+Sy_subset = Sy(:, :, frame_range);
+time_subset = time(frame_range);
+
+% Create video
 opts = struct();
-opts.caxis_limits = [-0.2, 0.2];      % Sx/Sy limits
-opts.mag_caxis_limits = [0, 0.2];     % Magnitude limits (always 0 to positive)
-opts.fps = fs/10;
-opts.colormap = 'turbo';          % Modern alternative to jet
+opts.caxis_limits = [-0.2, 0.2];
+opts.mag_caxis_limits = [0, 0.2];
+opts.fps = m.setup.fs / 10;
+opts.colormap = 'redblue';
 opts.mag_colormap = 'hot';
 
-video_folder='G:\Shared drives\AirSeaLab\Projects\SOARS\Data\20250108\';
-make_slope_video(Sx, Sy, time(500:510), strcat(video_folder,'slope_gauge_test_20260108.mp4'), opts);
+video_folder = 'Y:\HLAB_2026\SlopeGauge\Processed\';
+make_slope_video(Sx_subset, Sy_subset, time_subset, ...
+    strcat(video_folder, 'slope_gauge_test_20260108.mp4'), opts);
 %% Statistics
 fprintf('\n===== SLOPE STATISTICS =====\n');
 Sx_all = Sx(:);

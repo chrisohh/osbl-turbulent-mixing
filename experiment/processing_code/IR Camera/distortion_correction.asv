@@ -393,17 +393,93 @@ c.Label.String='Temp (^oC)';
 set(gca,'fontsize',16)
 clim([16,16.7])
 %% Do it for the rest of the frames
-outputVideo = VideoWriter('G:\Shared drives\OSBL\2026-01 Pilot Experiments\Processed_videos\unstrat_IR_Rec_000014.mp4', 'MPEG-4');
-outputVideo.FrameRate = 50;
-outputVideo.Quality = 100;
-open(outputVideo);
+%% Process and save all corrected frames using matfile
+corrected_fileName = 'Y:\HLAB_2026\IR_camera\Processed\distortion_corrected_Rec-000014.mat';
+m = matfile(corrected_fileName, 'Writable', true);
 
-fig = figure('Visible', 'off', 'Position', [100 100 800 600]);
-colormap(hot);
+% Initialize with 2 pages to force 3D recognition
+m.frame_corrected = zeros(size(X_regular,1), size(X_regular,2), 2, 'single');
 
 fprintf('Processing %d frames...\n', size(data,3));
 
 for n = 1:size(data,3)
+    if mod(n, 100) == 0
+        fprintf('Processing frame %d / %d\n', n, size(data,3));
+    end
+
+    masked_data = (data(:,:,n) - img_avg) .* mask;
+    masked_data(~mask) = NaN;
+
+    % Interpolate onto regular grid
+    frame_corrected = griddata(physicalX, physicalY, double(masked_data), ...
+        X_regular, Y_regular, 'linear');
+
+    % Write directly to disk (append to 3rd dimension)
+    m.frame_corrected(:,:,n) = single(frame_corrected);
+end
+
+fprintf('All frames saved to %s\n', corrected_fileName);
+
+%% Create video with frame skipping
+frame_skip = 5;
+video_fps = 30;
+
+outputVideo = VideoWriter('corrected_frames.mp4', 'MPEG-4');
+outputVideo.FrameRate = video_fps;
+outputVideo.Quality = 95;
+open(outputVideo);
+
+% Access the matfile for reading
+m = matfile(corrected_fileName);
+
+fig = figure('Visible', 'off', 'Position', [100 100 800 600]);
+colormap(hot);
+
+frame_indices = 1:frame_skip:size(data,3);
+fprintf('Creating video from %d frames (skip=%d)...\n', length(frame_indices), frame_skip);
+
+for idx = 1:length(frame_indices)
+    n = frame_indices(idx);
+
+    if mod(idx, 20) == 0
+        fprintf('Video frame %d / %d (data frame %d)\n', idx, length(frame_indices), n);
+    end
+
+    % Load single frame from matfile (efficient partial loading)
+    frameData = m.frameData_corrected(:,:,n);
+
+    imagesc(y_regular*100, x_regular*100, frameData'+16.7);
+    colormap(hot);
+    c = colorbar;
+    axis equal tight;
+    title(sprintf('$t=%.2f$ s', n/cameraInfo.frameRate), 'interpreter', 'latex');
+    xlabel('Along-wind (cm)');
+    ylabel('Cross-wind (cm)');
+    c.Label.String = 'Temp (^oC)';
+    set(gca, 'fontsize', 16);
+    clim([16, 16.7]);
+
+    frame = getframe(fig);
+    writeVideo(outputVideo, frame);
+end
+
+close(outputVideo);
+close(fig);
+fprintf('Video saved as corrected_frames.mp4\n');
+
+
+
+outputVideo = VideoWriter('G:\Shared drives\OSBL\2026-01 Pilot Experiments\Processed_videos\unstrat_IR_Rec_000014.mp4', 'MPEG-4');
+outputVideo.FrameRate = 10;
+outputVideo.Quality = 100;
+open(outputVideo);
+
+fig = figure('Visible', 'off', 'Position', [100 100 800 600],'Color','w');
+colormap(hot);
+
+fprintf('Processing %d frames...\n', size(data,3));
+
+for n = 1000:5:4000%size(data,3)
     if mod(n, 100) == 0
         fprintf('Frame %d / %d\n', n, size(data,3));
     end
@@ -420,7 +496,7 @@ for n = 1:size(data,3)
     title(sprintf('$t=%.2f$ s', n/cameraInfo.frameRate), 'interpreter', 'latex');
     xlabel('Along-wind (cm)');
     ylabel('Cross-wind (cm)');
-    c.Label.String = 'Temp (^oC)';
+    c.Label.String = 'Temp (^oC)'
     set(gca, 'fontsize', 16);
     clim([16, 16.7]);
     
