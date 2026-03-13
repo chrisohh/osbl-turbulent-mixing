@@ -18,12 +18,12 @@ imshow(obs_image);
 [img_height, img_width] = size(obs_image, [1 2]);
 
 imagesc(x_cm,y_cm,obs_image)
-axis equal
+axis equal tight
 fs = 50;  % Hz
 dt = 1/fs;  % 0.02 seconds between frames
 time=(n - 1) * dt;
 title(sprintf('$t = %.2f$ s',time),'Interpreter','latex','fontsize',16)
 set(gca,'fontsize',16,'fontname','times')
-xlim([-14,14])
+% xlim([-14,14])
 set(gcf,'color','white')
 xlabel('$x$ (cm)','Interpreter','latex');ylabel('$y$ (cm)','Interpreter','latex')

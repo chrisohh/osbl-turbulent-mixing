@@ -282,51 +282,62 @@ time_single = m.time(1, frame_num);
 % Sy_single = Sy(:, :, frame_num);
 % time_single = time(1, frame_num);
 %%
-figure('Position', [100 100 1400 600], 'Color', 'white');
+figure('Position', [100 100 1000 600], 'Color', 'white');
 
 % Sx plot
 subplot(1,2,1)
 imagesc(x_cm, y_cm,Sx_single);
 axis equal tight;
-colorbar;
+c=colorbar;
 colormap(gca, 'redblue');
-caxis([-0.2, 0.2]);
-title(sprintf('S_x at t = %.3f s', (frame_num-1)*dt*10);
-xlabel('X (pixels)');
-ylabel('Y (pixels)');
-
+caxis([-0.4, 0.4]);
+title(sprintf('$S_x$ at $t = %.2f$ s', (frame_num-1)*dt*10),'Interpreter','latex');
+xlabel('$x$ (cm)', 'interpreter','latex');
+ylabel('$y$ (cm)', 'interpreter','latex');
+set(gca, 'fontsize',14,'fontname','times')
+c.Label.String='$ak$';
+c.Label.Interpreter='latex';
+c.Label.FontSize=16;
 % Sy plot
 subplot(1,2,2)
 imagesc(x_cm, y_cm,Sy_single);
 axis equal tight;
-colorbar;
+c=colorbar;
 colormap(gca, 'redblue');
-caxis([-0.2, 0.2]);
-title(sprintf('S_y at t = %.3f s', time_single));
-xlabel('X (pixels)');
-ylabel('Y (pixels)');
-
+caxis([-0.4, 0.4]);
+title(sprintf('$S_y$ at $t = %.2f$ s', (frame_num-1)*dt*10),'Interpreter','latex');
+xlabel('$x$ (cm)', 'interpreter','latex');
+ylabel('$y$ (cm)', 'interpreter','latex');
+set(gca, 'fontsize',14,'fontname','times')
+c.Label.String='$ak$';
+c.Label.Interpreter='latex';
+c.Label.FontSize=16;
 %% Then, if you like what you see, create video for a range
 
 % Define your frame range
-frame_range = 1:length(time);  % or whatever range you want
+frame_range = 1:nFrames;  % or whatever range you want
 
 fprintf('Loading frames %d to %d...\n', frame_range(1), frame_range(end));
-Sx_subset = Sx(:, :, frame_range);
-Sy_subset = Sy(:, :, frame_range);
+Sx_subset = m.Sx(:, :, frame_range);
+Sy_subset = m.Sy(:, :, frame_range);
 time_subset = time(frame_range);
 
-% Create video
+% Set video options
 opts = struct();
-opts.caxis_limits = [-0.2, 0.2];
-opts.mag_caxis_limits = [0, 0.2];
-opts.fps = m.setup.fs / 10;
-opts.colormap = 'redblue';
-opts.mag_colormap = 'hot';
+opts.caxis_limits = [-0.4, 0.4];           % Match your single frame plot
+opts.fps = m.setup.fs / 10;                % Frame rate
+opts.quality = 90;                         % Video quality
+opts.figure_position = [100 100 1000 600]; % Match your figure size
+opts.colorbar_label = '$ak$';              % Colorbar label
 
+% Output path
 video_folder = 'Y:\HLAB_2026\SlopeGauge\Processed\';
-make_slope_video(Sx_subset, Sy_subset, time_subset, ...
-    strcat(video_folder, 'slope_gauge_test_20260108.mp4'), opts);
+output_file = fullfile(video_folder, 'slope_gauge_20260108_skip10.mp4');
+
+% Create the video
+make_slope_video(Sx_subset, Sy_subset, time_subset, x_cm, y_cm, output_file, opts);
+
+fprintf('Video creation complete!\n');
 %% Statistics
 fprintf('\n===== SLOPE STATISTICS =====\n');
 Sx_all = Sx(:);
@@ -386,13 +397,14 @@ for i = 1:nFrames
     ak2_Sx(i) = mean(Sx_frame(:).^2);
     ak2_Sy(i) = mean(Sy_frame(:).^2);
 end
+%%
 
 figure('Name', 'Mean Square Slope Evolution');
 plot(time, ak2_Sx,'LineWidth',1.5); hold on;
 plot(time, ak2_Sy,'LineWidth',1.5);
-plot(time, ak2_Smag, '--k','LineWidth',1.5);
+% plot(time, ak2_Smag, '--k','LineWidth',1.5);
 xlabel('Time (s)');
 ylabel('$(ak)^2$', 'Interpreter', 'latex');
-legend('S_x', 'S_y', '|S|');
+legend('S_x', 'S_y');
 grid off;
-set(gca,'fontsize',12)
+set(gca,'fontsize',16)
