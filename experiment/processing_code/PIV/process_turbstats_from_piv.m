@@ -93,9 +93,26 @@ stats_A = compute_horizontal_avg_turbstats(v_turb_A, w_turb_A, z_piv, t_piv);
 [v_turb_B, w_turb_B] = remove_wave_from_piv(v_cross, w_vert, 'hmean');
 stats_B = compute_horizontal_avg_turbstats(v_turb_B, w_turb_B, z_piv, t_piv);
 
+%% --- METHOD C: PHASE-AVERAGE SUBTRACTION ---
+% Extract wave phase at PIV fetch location from longitudinal Hilbert analysis.
+[~, ix_piv_phi] = min(abs(x_eta - params.x_piv));
+phi_at_piv = wave_info.phi(ix_piv_phi, :);   % [1 × Nt_eta]
+
+% Interpolate phase onto PIV time vector (unwrapped, then re-wrap inside function).
+phi_piv = interp1(t_eta, phi_at_piv, t_piv, 'linear', 'extrap');
+
+Nbins = 16;
+[v_turb_C, w_turb_C, phavg_info] = remove_wave_phase_avg(v_cross, w_vert, phi_piv, Nbins);
+stats_C = compute_horizontal_avg_turbstats(v_turb_C, w_turb_C, z_piv, t_piv);
+
+fprintf('Phase bins: min %d, max %d, mean %.0f frames per bin\n', ...
+        min(phavg_info.counts), max(phavg_info.counts), mean(phavg_info.counts));
+
 %% --- SAVE ---
-save('turbstats_JFM2023.mat', 'stats_A', 'stats_B', 'wave_info', 'params');
-disp('Done. Saved turbstats_JFM2023.mat');
+save('turbstats_Transverse_Ramp2_Exp1.mat', ...
+     'stats_A', 'stats_B', 'stats_C', 'wave_info', 'phavg_info', 'params');
+disp('Done. Saved turbstats_Transverse_Ramp2_Exp1.mat');
 
 %% --- PLOT ---
 plot_turbstats_profiles(stats_A);
+plot_compare_methods(stats_A, stats_B, stats_C);
