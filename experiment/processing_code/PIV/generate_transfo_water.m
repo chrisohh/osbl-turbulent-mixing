@@ -32,8 +32,8 @@ f = fft(eta);
 % Symmetric vector: keep only positive frequencies (one-sided spectrum)
 Sym_Vec = zeros(1, Nx);
 Sym_Vec(1) = 1;
-Sym_Vec(Nx/2 + 1) = 1;
-Sym_Vec(2:Nx/2) = 2;
+Sym_Vec(fix(Nx/2) + 1) = 1;
+Sym_Vec(2:fix(Nx/2)) = 2;
 % Sym_Vec(Nx/2+2:end) = 0  (already zero)
 
 F = f .* Sym_Vec;
