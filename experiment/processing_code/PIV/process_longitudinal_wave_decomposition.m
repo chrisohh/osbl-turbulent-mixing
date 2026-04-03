@@ -1,8 +1,9 @@
 clear; clc;
 
 %% --- PATHS ---
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - IR PIV to compute surface velocity\');
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - Transverse structures PIV\');
+root = get_server_root();
+addpath([root 'codes\202204 - IR PIV to compute surface velocity\']);
+addpath([root 'codes\202204 - Transverse structures PIV\']);
 
 %% --- PARAMETERS ---
 params.g     = 9.81;
@@ -12,7 +13,7 @@ params.x_piv = 12.0;        % m fetch of cross-wind PIV plane
 t_image_offset = 38;         % s (first frame in JFM coordinates)
 
 %% --- LOAD ETA (Ramp 2, Exp 1) ---
-dirin_eta = '\\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\';
+dirin_eta = [root 'Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\'];
 Fs_eta    = 7.2;
 delay_eta = 73 + 5;
 
@@ -26,7 +27,7 @@ clear A1 surface_x1;
 
 %% --- LOAD LONGITUDINAL PIV DATA (Ramp 2, Exp 1) ---
 % Adjust this path if the longitudinal velocity data lives elsewhere.
-dir_piv_long = '\\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\PIVMat\';
+dir_piv_long = [root 'Longitudinal\PIV\ExpLCL_2_01\PIVMat\'];
 
 D_tmp = dir([dir_piv_long, '*.mat']);
 tmp   = load([dir_piv_long, D_tmp(1).name], 'compVel');

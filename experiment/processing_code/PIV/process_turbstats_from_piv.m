@@ -1,11 +1,12 @@
 clear; clc;
 
 %% --- PATHS ---
+root = get_server_root();
 % Smoothn utility (N-D robust spline smoothing)
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - IR PIV to compute surface velocity\');
+addpath([root 'codes\202204 - IR PIV to compute surface velocity\']);
 
 % process_one_directory_transverse_PIV
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - Transverse structures PIV\');
+addpath([root 'codes\202204 - Transverse structures PIV\']);
 
 %% --- PARAMETERS ---
 params.g     = 9.81;        % m/s^2
@@ -25,7 +26,7 @@ t_image_offset = 38;  % s  (time of first PIV frame in JFM coordinates)
 % run_all_R2.m uses hardcoded E:\ paths, so inline the loading with server paths.
 % Source: \\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\
 
-dirin_eta = '\\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\';
+dirin_eta = [root 'Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\'];
 Fs_eta    = 7.2;   % Hz
 delay_eta = 73 + 5;  % s  (= 78 s after trigger = 38 s in JFM time)
 
@@ -39,7 +40,7 @@ eta   = A1;                                                    % [Nx × Nt_eta]
 clear A1 surface_x1;
 
 %% --- LOAD PIV DATA (Ramp 2, Repeat 01) ---
-dir_piv = '\\Airseaserver41\D\DelawareDataBackup\Transverse\PIV\ExpLCTB_2_01\PIVMat2\';
+dir_piv = [root 'Transverse\PIV\ExpLCTB_2_01\PIVMat2\'];
 
 % Get spatial scale (DX, GS) from the first compVel file without loading all frames.
 D_tmp = dir([dir_piv, '*.mat']);
