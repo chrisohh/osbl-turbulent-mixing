@@ -39,10 +39,21 @@ end
 STAT = STAT_LG_R2_EXP1;
 
 % --- Convenience variables ---
-% Cube dimensions: u(time, x_along_wind, z_depth)
-t_piv = STAT.time - t_wind_onset;  % JFM time  [Nt x 1]
-x_piv = STAT.X(:);                 % along-wind [Nx x 1]  m
-z_piv = -STAT.Y(:);                % depth, negative downward [Nz x 1]  m
+% process_one_directory_transverse_PIV convention (confirmed via imagesc call):
+%   squeeze(STAT.u(t,:,:)) is [N_2nd x N_3rd]
+%   imagesc(STAT.X, STAT.Y, squeeze(STAT.u(t,:,:))) puts STAT.X on x-axis (cols)
+%   and STAT.Y on y-axis (rows), so:
+%     STAT.Y → 2nd dim → horizontal (along-wind x)
+%     STAT.X → 3rd dim → vertical   (depth z)
+%
+% For pcolor(x_piv, z_piv, data) we need data = [Nz x Nx], so squeeze(...)' is required.
+
+t_piv = STAT.time - t_wind_onset;  % JFM time [Nt x 1]
+x_piv = STAT.Y(:);                 % along-wind [Nx x 1] m   (2nd dim)
+z_piv = STAT.X(:);                 % depth      [Nz x 1] m   (3rd dim), positive downward
+%   z_piv(1) = DX*GS ≈ first grid cell below image top.
+%   Image top ≈ mean water surface by camera design.
+%   → z_piv is already depth below mean water level (check: fprintf below).
 
 [Nt, Nx, Nz] = size(STAT.u);
 fprintf('Longitudinal cube: Nt=%d  Nx=%d  Nz=%d\n', Nt, Nx, Nz);
@@ -63,33 +74,177 @@ clear A1 surface_x1;
 fprintf('eta: Nx=%d  Nt=%d  t=%.1f–%.1f s\n', length(x_eta), length(t_eta), t_eta(1), t_eta(end));
 
 %% =========================================================================
+%% SECTION 2b — VERIFICATION
+%%   Run this section after loading STAT and eta.
+%%   Each check prints PASS / WARN / FAIL with a diagnosis.
+%% =========================================================================
+fprintf('\n========== VERIFICATION ==========\n');
+ok = true;
+
+% ---- (1) STAT dimension ordering ----------------------------------------
+% Expected: size(STAT.u) = [Nt, Nx_along_wind, Nz_depth]
+% From user's imagesc call: STAT.Y is 2nd dim (along-wind), STAT.X is 3rd dim (depth)
+assert_dim = (length(STAT.Y) == Nx) && (length(STAT.X) == Nz);
+if assert_dim
+    fprintf('  [PASS] STAT dimensions: Nt=%d  Nx(along-wind)=%d  Nz(depth)=%d\n', Nt, Nx, Nz);
+else
+    fprintf('  [FAIL] STAT.Y length (%d) != Nx (%d) or STAT.X length (%d) != Nz (%d)\n', ...
+        length(STAT.Y), Nx, length(STAT.X), Nz);
+    fprintf('         Check whether X/Y assignment is swapped.\n');
+    ok = false;
+end
+
+% ---- (2) Grid spacing matches DX*GS -------------------------------------
+dx_x = mean(diff(x_piv));
+dx_z = mean(diff(z_piv));
+expected_gs = DX * GS;
+if abs(dx_x - expected_gs)/expected_gs < 0.01 && abs(dx_z - expected_gs)/expected_gs < 0.01
+    fprintf('  [PASS] Grid spacing: dx=%.4f mm  dz=%.4f mm  (expected %.4f mm)\n', ...
+        dx_x*1e3, dx_z*1e3, expected_gs*1e3);
+else
+    fprintf('  [WARN] Grid spacing mismatch: dx=%.4f mm, dz=%.4f mm, expected=%.4f mm\n', ...
+        dx_x*1e3, dx_z*1e3, expected_gs*1e3);
+    fprintf('         DX or GS parameter may be wrong.\n');
+end
+
+% ---- (3) eta units: metres vs pixels ------------------------------------
+eta_rms_mm = rms(eta(:)) * 1e3;
+eta_mean_mm = mean(eta(:)) * 1e3;
+if eta_rms_mm < 20
+    fprintf('  [PASS] eta RMS = %.3f mm  (capillary-gravity range ~1–5 mm) → units = metres\n', eta_rms_mm);
+else
+    fprintf('  [FAIL] eta RMS = %.1f mm — likely still in PIXELS (expect ~1000–3000)\n', eta_rms_mm);
+    fprintf('         Fix:  eta = (MWL - eta_pixels) * DX\n');
+    fprintf('         MWL for Ramp2: 2468 px  (from Fab1_Main_PIVCalc MeanWL vector)\n');
+    ok = false;
+end
+
+% ---- (4) eta mean ≈ 0 (MWL already subtracted) -------------------------
+if abs(eta_mean_mm) < 1.0
+    fprintf('  [PASS] eta mean = %.4f mm ≈ 0  (MWL already subtracted)\n', eta_mean_mm);
+else
+    fprintf('  [WARN] eta mean = %.3f mm  (non-zero; subtracting before use)\n', eta_mean_mm);
+    fprintf('         This is fine — code uses eta_fluct = eta_snap - eta_mean.\n');
+end
+
+% ---- (5) eta spatial coverage of PIV FOV --------------------------------
+x_piv_min = x_piv(1);   x_piv_max = x_piv(end);
+x_eta_min = x_eta(1);   x_eta_max = x_eta(end);
+if x_eta_min <= x_piv_min && x_eta_max >= x_piv_max
+    fprintf('  [PASS] eta x-range [%.1f, %.1f] mm covers PIV FOV [%.1f, %.1f] mm\n', ...
+        x_eta_min*1e3, x_eta_max*1e3, x_piv_min*1e3, x_piv_max*1e3);
+else
+    fprintf('  [WARN] eta x-range [%.1f, %.1f] mm does NOT fully cover PIV FOV [%.1f, %.1f] mm\n', ...
+        x_eta_min*1e3, x_eta_max*1e3, x_piv_min*1e3, x_piv_max*1e3);
+    fprintf('         Extrapolation will be used at edges.\n');
+end
+
+% ---- (6) Time overlap between eta and PIV -------------------------------
+t_overlap_start = max(t_eta(1),  t_piv(1));
+t_overlap_end   = min(t_eta(end), t_piv(end));
+overlap_frac = (t_overlap_end - t_overlap_start) / (t_piv(end) - t_piv(1));
+if overlap_frac > 0.95
+    fprintf('  [PASS] Time overlap: %.1f–%.1f s  (%.0f%% of PIV record)\n', ...
+        t_overlap_start, t_overlap_end, 100*overlap_frac);
+elseif overlap_frac > 0
+    fprintf('  [WARN] Partial time overlap: %.1f–%.1f s  (%.0f%% of PIV record)\n', ...
+        t_overlap_start, t_overlap_end, 100*overlap_frac);
+    fprintf('         Check delay and t_wind_onset parameters.\n');
+else
+    fprintf('  [FAIL] No time overlap between eta (%.1f–%.1f s) and PIV (%.1f–%.1f s)\n', ...
+        t_eta(1), t_eta(end), t_piv(1), t_piv(end));
+    fprintf('         Check delay (%g s) and t_wind_onset (%g s).\n', delay, t_wind_onset);
+    ok = false;
+end
+
+% ---- (7) Typical velocity magnitude -------------------------------------
+u_sample = STAT.u(round(Nt/2), :, :);
+u_rms = rms(u_sample(:), 'omitnan');
+if u_rms > 0 && u_rms < 5
+    fprintf('  [PASS] u RMS (mid-record sample) = %.4f m/s  (physically reasonable)\n', u_rms);
+elseif u_rms == 0 || isnan(u_rms)
+    fprintf('  [FAIL] u is all NaN or zero — data may not have loaded correctly.\n');
+    ok = false;
+else
+    fprintf('  [WARN] u RMS = %.2f m/s — unusually large. Check DX/DT.\n', u_rms);
+end
+
+% ---- (8) FOV depth vs expected (~14 cm) ---------------------------------
+fov_depth_mm = z_piv(end) * 1e3;
+if fov_depth_mm > 50 && fov_depth_mm < 250
+    fprintf('  [PASS] PIV depth FOV = %.1f mm\n', fov_depth_mm);
+else
+    fprintf('  [WARN] PIV depth FOV = %.1f mm — expected ~100–150 mm.\n', fov_depth_mm);
+    fprintf('         If ~0.27 mm: GS may be wrong (grid spacing = DX not DX*GS).\n');
+    fprintf('         If ~%d px:   DX not applied — check STAT.X units.\n', round(fov_depth_mm));
+end
+
+% ---- (9) z_piv(1) ≈ one grid cell (surface is at image top) -------------
+expected_z1 = DX * GS;
+if abs(z_piv(1) - expected_z1)/expected_z1 < 0.05
+    fprintf('  [PASS] z_piv(1) = %.4f mm ≈ DX*GS (first vector one cell below surface)\n', ...
+        z_piv(1)*1e3);
+else
+    fprintf('  [WARN] z_piv(1) = %.4f mm  (expected %.4f mm = DX*GS)\n', ...
+        z_piv(1)*1e3, expected_z1*1e3);
+    fprintf('         STAT.X may start at 0 instead of DX*GS — z_piv(1)=0 means surface IS in the grid.\n');
+end
+
+% ---- Summary ------------------------------------------------------------
+if ok
+    fprintf('\n  ALL CRITICAL CHECKS PASSED — safe to continue.\n');
+else
+    fprintf('\n  ONE OR MORE CRITICAL CHECKS FAILED — fix above before continuing.\n');
+end
+fprintf('===================================\n\n');
+
+%% =========================================================================
 %% SECTION 3 — SELECT SNAPSHOT & PLOT CARTESIAN VELOCITY FIELD
 %% =========================================================================
 [~, it_snap] = min(abs(t_piv - t_snap_target));
 fprintf('\nSnapshot: t = %.2f s  (frame %d of %d)\n', t_piv(it_snap), it_snap, Nt);
 
-% u(t, x, z)  →  [Nz x Nx] for plotting (z on y-axis, x on x-axis)
+% squeeze(STAT.u(t,:,:)) = [Nx x Nz];  transpose → [Nz x Nx] for pcolor(x_piv, z_piv, ...)
 u_cart = squeeze(STAT.u(it_snap, :, :))';   % [Nz x Nx]
 w_cart = squeeze(STAT.v(it_snap, :, :))';   % [Nz x Nx]
 
-% Surface elevation at this frame (interpolated onto PIV x-grid)
+% --- Surface elevation for this frame ---
 [~, it_e] = min(abs(t_eta - t_piv(it_snap)));
-eta_snap = interp1(x_eta, eta(:, it_e), x_piv, 'linear', 'extrap')';  % [1 x Nx]
+eta_snap = interp1(x_eta, eta(:, it_e), x_piv, 'linear', 'extrap')';  % [1 x Nx] m
+
+% eta reference: subtract the long-term mean so that z=0 is the mean water level.
+% Fabio's equivalent: DC bin of fft(surface_fab) carries the mean; zPIV is already
+% measured from the mean surface. We do the same explicitly here.
+eta_mean   = mean(eta(:));           % scalar, long-term spatial+temporal mean
+eta_fluct  = eta_snap - eta_mean;    % [1 x Nx] wave fluctuation, mean-zero
+
+% In the depth axis (z positive downward, z=0 at mean surface):
+%   surface is at  z = -eta_fluct
+%     crest (eta_fluct > 0) → z < 0 → surface is above mean (at top of/above plot)
+%     trough (eta_fluct < 0) → z > 0 → surface dips below mean (visible in plot)
+% Check: fprintf prints the RMS so you can verify eta is in metres, not pixels.
+fprintf('  eta mean=%.4f mm,  RMS=%.4f mm  (should be ~1-3 mm for capillary-gravity)\n', ...
+    eta_mean*1e3, rms(eta_fluct)*1e3);
+
+z_surf_line = -eta_fluct;   % [1 x Nx]  depth coordinate of instantaneous surface
 
 figure('Name', sprintf('Sec 3 | Cartesian snapshot  t=%.1f s', t_piv(it_snap)), ...
        'Position', [50 550 1200 380]);
 subplot(1,2,1);
 pcolor(x_piv*1e3, z_piv*1e3, u_cart); shading flat;
-hold on; plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 1.5);
+hold on; plot(x_piv*1e3, z_surf_line*1e3, 'k', 'LineWidth', 1.5);
 colorbar; colormap_bwr(); caxis_sym(gca);
-xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','normal');
+xlabel('x (mm)'); ylabel('z (mm,  +down)');
+% YDir reverse: z=0 (mean surface) at top, depth increases downward — water below
+set(gca, 'YDir', 'reverse');
 title('u_{cart}  [m/s]');
 
 subplot(1,2,2);
 pcolor(x_piv*1e3, z_piv*1e3, w_cart); shading flat;
-hold on; plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 1.5);
+hold on; plot(x_piv*1e3, z_surf_line*1e3, 'k', 'LineWidth', 1.5);
 colorbar; colormap_bwr(); caxis_sym(gca);
-xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','normal');
+xlabel('x (mm)'); ylabel('z (mm,  +down)');
+set(gca, 'YDir', 'reverse');
 title('w_{cart}  [m/s]');
 sgtitle(sprintf('Section 3 — Cartesian snapshot  t = %.1f s', t_piv(it_snap)));
 drawnow;
@@ -103,7 +258,11 @@ drawnow;
 dz      = abs(z_piv(2) - z_piv(1));
 zeta_vec = (0 : dz : abs(z_piv(end)))';   % [Nz x 1]  depth below surface
 
-transfo = generate_transfo_water(eta_snap, x_piv, zeta_vec);
+% Use mean-zero eta for the wave-following transform.
+% The DC offset (eta_mean) shifts z=0 but doesn't create a wavy surface to flatten.
+% Fabio's equivalent: fft(surface_fab) DC term sets the absolute level of h,
+% but the wave undulation comes from the AC components only.
+transfo = generate_transfo_water(eta_fluct, x_piv, zeta_vec);
 
 u_wf = transform_field_to_wavefollowing(u_cart, z_piv, transfo);
 w_wf = transform_field_to_wavefollowing(w_cart, z_piv, transfo);
@@ -135,8 +294,8 @@ for k = 1:length(zeta_show)
     [~, iz] = min(abs(zeta_vec - zeta_show(k)));
     plot(x_piv*1e3, transfo.Z_grid(iz,:)*1e3, '-', 'Color', clr(k,:), 'LineWidth', 1.2);
 end
-plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 2);
-xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','normal');
+plot(x_piv*1e3, z_surf_line*1e3, 'k', 'LineWidth', 2);  % surface at z = -eta_fluct
+xlabel('x (mm)'); ylabel('z (mm,  +down)'); set(gca,'YDir','reverse');
 colorbar;
 legend([{'w_{cart}', '\eta(x)'}; ...
     arrayfun(@(z) sprintf('\\zeta=%.0fmm', z*1e3), zeta_show', 'Uni',0)], ...
