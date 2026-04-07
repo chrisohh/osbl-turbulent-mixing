@@ -195,6 +195,79 @@ else
     fprintf('         STAT.X may start at 0 instead of DX*GS — z_piv(1)=0 means surface IS in the grid.\n');
 end
 
+% ---- (10) Masking: which side of the surface is data on? -----------------
+%   Fabio's PIVMask.m:  Mask(1:floor(PF_Surface(i)), i) = 1  → keeps AIR (rows above surface)
+%   Your data should be WATER side: valid data BELOW the surface, NaN above.
+%
+%   Diagnostic: for the middle frame, check whether data is mostly above or
+%   below the expected surface row.
+mid_frame = squeeze(STAT.u(round(Nt/2), :, :));  % [Nx x Nz]
+nan_frac_top    = mean(isnan(mid_frame(:, 1:min(5,Nz))),     'all');  % top (near surface)
+nan_frac_bottom = mean(isnan(mid_frame(:, max(1,Nz-4):Nz)),  'all');  % bottom (deep)
+
+if nan_frac_top > nan_frac_bottom
+    fprintf('  [PASS] Masking: NaN concentrated near surface (top=%.0f%% NaN, bottom=%.0f%%) → WATER side data\n', ...
+        nan_frac_top*100, nan_frac_bottom*100);
+elseif nan_frac_bottom > nan_frac_top
+    fprintf('  [WARN] Masking: NaN concentrated at depth (top=%.0f%%, bottom=%.0f%%) → might be AIR side data\n', ...
+        nan_frac_top*100, nan_frac_bottom*100);
+    fprintf('         If this is wrong, your data may need re-masking (see check 11).\n');
+else
+    fprintf('  [INFO] Masking: NaN distribution uniform (top=%.0f%%, bottom=%.0f%%) → no mask applied?\n', ...
+        nan_frac_top*100, nan_frac_bottom*100);
+end
+
+% ---- (11) Apply water-side mask if needed --------------------------------
+%   If data has NO mask (both sides valid) or wrong mask (air side),
+%   apply water-side mask using eta to NaN everything above the surface.
+%
+%   Fabio (air side):   Mask(1:floor(surface), col) = 1     → keep above surface
+%   Water side (ours):  Mask(ceil(surface):end, col) = 1    → keep below surface
+%
+%   Set apply_water_mask = true to force masking.
+
+apply_water_mask = false;   % ← change to true if check (10) says air-side or no mask
+
+if apply_water_mask
+    fprintf('  [ACTION] Applying water-side mask to STAT.u and STAT.v...\n');
+    for it = 1:Nt
+        [~, ite] = min(abs(t_eta - t_piv(it)));
+        eta_t = interp1(x_eta, eta(:,ite), x_piv, 'linear', 'extrap');  % [Nx x 1]
+
+        for ix = 1:Nx
+            % Surface depth in z_piv coords: z_surface = -eta_fluct
+            % NaN everything shallower than the surface (above it = air)
+            z_surface = -eta_t(ix) + mean(eta(:));
+            air_rows = z_piv < z_surface;
+            STAT.u(it, ix, air_rows) = NaN;
+            STAT.v(it, ix, air_rows) = NaN;
+        end
+    end
+    fprintf('  [DONE]  Water-side mask applied (%d frames).\n', Nt);
+end
+
+% ---- Diagnostic plot: raw velocity with NaN pattern ---------------------
+figure('Name', 'Sec 2b | Masking diagnostic', 'Position', [50 600 1000 350]);
+it_diag = round(Nt/2);
+u_diag = squeeze(STAT.u(it_diag, :, :))';  % [Nz x Nx]
+
+subplot(1,2,1);
+imagesc(x_piv*1e3, z_piv*1e3, u_diag);
+set(gca, 'YDir', 'reverse');
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('z (mm, +down)');
+title(sprintf('u  (frame %d)', it_diag));
+
+subplot(1,2,2);
+imagesc(x_piv*1e3, z_piv*1e3, double(isnan(u_diag)));
+set(gca, 'YDir', 'reverse');
+colormap(gca, [1 1 1; 0.8 0.2 0.2]);  % white=valid, red=NaN
+xlabel('x (mm)'); ylabel('z (mm, +down)');
+title('NaN mask (red = NaN = masked out)');
+
+sgtitle(sprintf('Section 2b — Masking diagnostic  (frame %d of %d)', it_diag, Nt));
+drawnow;
+
 % ---- Summary ------------------------------------------------------------
 if ok
     fprintf('\n  ALL CRITICAL CHECKS PASSED — safe to continue.\n');
