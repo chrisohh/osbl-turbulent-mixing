@@ -39,7 +39,6 @@ end
 STAT = STAT_LG_R2_EXP1;
 
 % --- Convenience variables ---
-<<<<<<< Updated upstream
 % process_one_directory_transverse_PIV convention (confirmed via imagesc call):
 %   squeeze(STAT.u(t,:,:)) is [N_2nd x N_3rd]
 %   imagesc(STAT.X, STAT.Y, squeeze(STAT.u(t,:,:))) puts STAT.X on x-axis (cols)
@@ -55,12 +54,11 @@ z_piv = STAT.X(:);                 % depth      [Nz x 1] m   (3rd dim), positive
 %   z_piv(1) = DX*GS ≈ first grid cell below image top.
 %   Image top ≈ mean water surface by camera design.
 %   → z_piv is already depth below mean water level (check: fprintf below).
-=======
+
 % Cube dimensions: u(time, x_along_wind, z_depth)
 t_piv = STAT.time - t_wind_onset;  % JFM time  [Nt x 1]
 x_piv = STAT.X(:);                 % along-wind [Nx x 1]  m
 z_piv = STAT.Y(:);                % depth, negative downward [Nz x 1]  m
->>>>>>> Stashed changes
 
 [Nt, Nx, Nz] = size(STAT.u);
 fprintf('Longitudinal cube: Nt=%d  Nx=%d  Nz=%d\n', Nt, Nx, Nz);
@@ -211,15 +209,13 @@ fprintf('===================================\n\n');
 [~, it_snap] = min(abs(t_piv - t_snap_target));
 fprintf('\nSnapshot: t = %.2f s  (frame %d of %d)\n', t_piv(it_snap), it_snap, Nt);
 
-<<<<<<< Updated upstream
 % squeeze(STAT.u(t,:,:)) = [Nx x Nz];  transpose → [Nz x Nx] for pcolor(x_piv, z_piv, ...)
 u_cart = squeeze(STAT.u(it_snap, :, :))';   % [Nz x Nx]
 w_cart = squeeze(STAT.v(it_snap, :, :))';   % [Nz x Nx]
-=======
+
 % u(t, x, z)  →  [Nz x Nx] for plotting (z on y-axis, x on x-axis)
 u_cart = squeeze(STAT.u(it_snap, :, :));   % [Nz x Nx]
 w_cart = squeeze(STAT.v(it_snap, :, :));   % [Nz x Nx]
->>>>>>> Stashed changes
 
 % --- Surface elevation for this frame ---
 [~, it_e] = min(abs(t_eta - t_piv(it_snap)));
@@ -247,25 +243,23 @@ subplot(1,2,1);
 pcolor(x_piv*1e3, z_piv*1e3, u_cart); shading flat;
 hold on; plot(x_piv*1e3, z_surf_line*1e3, 'k', 'LineWidth', 1.5);
 colorbar; colormap_bwr(); caxis_sym(gca);
-<<<<<<< Updated upstream
+
 xlabel('x (mm)'); ylabel('z (mm,  +down)');
 % YDir reverse: z=0 (mean surface) at top, depth increases downward — water below
 set(gca, 'YDir', 'reverse');
-=======
+
 xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','reverse');
->>>>>>> Stashed changes
 title('u_{cart}  [m/s]');
 
 subplot(1,2,2);
 pcolor(x_piv*1e3, z_piv*1e3, w_cart); shading flat;
 hold on; plot(x_piv*1e3, z_surf_line*1e3, 'k', 'LineWidth', 1.5);
 colorbar; colormap_bwr(); caxis_sym(gca);
-<<<<<<< Updated upstream
+
 xlabel('x (mm)'); ylabel('z (mm,  +down)');
 set(gca, 'YDir', 'reverse');
-=======
+
 xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','reverse');
->>>>>>> Stashed changes
 title('w_{cart}  [m/s]');
 sgtitle(sprintf('Section 3 — Cartesian snapshot  t = %.1f s', t_piv(it_snap)));
 drawnow;
