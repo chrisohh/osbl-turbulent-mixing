@@ -1,205 +1,328 @@
 clear; clc;
 
-%% --- PATHS ---
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - IR PIV to compute surface velocity\');
-addpath('\\Airseaserver41\D\DelawareDataBackup\codes\202204 - Transverse structures PIV\');
+%% =========================================================================
+%% PARAMETERS
+%% =========================================================================
+root    = get_server_root();
+addpath([root 'codes\202204 - IR PIV to compute surface velocity\']);
+addpath([root 'codes\202204 - Transverse structures PIV\']);
 
-%% --- PARAMETERS ---
-params.g     = 9.81;
-params.gamma = 7.2e-5;      % m^3/s^2 (surface tension / density)
-params.Fs    = 7.2;          % Hz PIV frame rate
-params.x_piv = 12.0;        % m fetch of cross-wind PIV plane
-t_image_offset = 38;         % s (first frame in JFM coordinates)
+Fs_PIV  = 7.2;          % Hz
+delay   = 73 + 5;       % s  (imaging starts delay s after trigger)
+DX      = 6.7861e-05;   % m/pixel
+GS      = 4;            % PIV window size (pixels); physical grid = DX*GS
+t_wind_onset = 40;      % s  trigger→wind onset (for JFM time axis)
+t_snap_target = 55;     % s  (JFM) snapshot to visualise
 
-%% --- LOAD ETA (Ramp 2, Exp 1) ---
-dirin_eta = '\\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\';
-Fs_eta    = 7.2;
-delay_eta = 73 + 5;
+%% =========================================================================
+%% SECTION 1 — LOAD / REPROCESS LONGITUDINAL PIV CUBE
+%% =========================================================================
+cube_file = [root 'codes\202204 - Transverse structures PIV\R2_EXP1_Longitudinal_PIV_Cube.mat'];
 
-load([dirin_eta, 'A.mat']);
-load([dirin_eta, 'ExpLCL_2_01_Surface_000.mat']);
+if exist(cube_file, 'file')
+    fprintf('Loading saved longitudinal cube: %s\n', cube_file);
+    load(cube_file);                     % loads STAT_LG_R2_EXP1
+else
+    fprintf('Cube file not found — reprocessing from PIVMat...\n');
+    dirin = [root 'Longitudinal\PIV\ExpLCL_2_01\PIVMat\'];
+    STAT_LG_R2_EXP1 = process_one_directory_transverse_PIV(dirin);
 
-x_eta = surface_x1(:);                                   % [Nx x 1] m
-t_eta = delay_eta + (0:size(A1,2)-1) / Fs_eta - 40;     % JFM time
-eta   = A1;                                               % [Nx x Nt]
+    % Time, X (along-wind), Z (depth) axes
+    STAT_LG_R2_EXP1.time = delay + STAT_LG_R2_EXP1.filenumber / Fs_PIV;
+    STAT_LG_R2_EXP1.X    = (1:length(STAT_LG_R2_EXP1.u(1,1,:))) * DX * GS;  % along-wind (m)
+    STAT_LG_R2_EXP1.Y    = (1:length(STAT_LG_R2_EXP1.u(1,:,1))) * DX * GS;  % depth      (m)
+
+    save(cube_file, 'STAT_LG_R2_EXP1', '-v7.3');
+    fprintf('Saved to %s\n', cube_file);
+end
+
+STAT = STAT_LG_R2_EXP1;
+
+% --- Convenience variables ---
+% Cube dimensions: u(time, x_along_wind, z_depth)
+t_piv = STAT.time - t_wind_onset;  % JFM time  [Nt x 1]
+x_piv = STAT.X(:);                 % along-wind [Nx x 1]  m
+z_piv = STAT.Y(:);                % depth, negative downward [Nz x 1]  m
+
+[Nt, Nx, Nz] = size(STAT.u);
+fprintf('Longitudinal cube: Nt=%d  Nx=%d  Nz=%d\n', Nt, Nx, Nz);
+fprintf('  x: %.1f–%.1f mm,  z: %.1f–%.1f mm\n', ...
+    1e3*x_piv(1), 1e3*x_piv(end), 1e3*z_piv(1), 1e3*z_piv(end));
+
+%% =========================================================================
+%% SECTION 2 — LOAD ETA
+%% =========================================================================
+dirin_eta = [root 'Longitudinal\PIV\ExpLCL_2_01\PIVRaw\EXTRACTED_SURFACES\'];
+load([dirin_eta 'A.mat']);                           % A1 [Nx_eta x Nt_eta]
+load([dirin_eta 'ExpLCL_2_01_Surface_000.mat']);     % surface_x1
+
+x_eta = surface_x1(:);
+t_eta = delay + (0:size(A1,2)-1)/Fs_PIV - t_wind_onset;
+eta   = A1;   % [Nx_eta x Nt_eta]  m
 clear A1 surface_x1;
+fprintf('eta: Nx=%d  Nt=%d  t=%.1f–%.1f s\n', length(x_eta), length(t_eta), t_eta(1), t_eta(end));
 
-%% --- LOAD LONGITUDINAL PIV DATA (Ramp 2, Exp 1) ---
-% Adjust this path if the longitudinal velocity data lives elsewhere.
-dir_piv_long = '\\Airseaserver41\D\DelawareDataBackup\Longitudinal\PIV\ExpLCL_2_01\PIVMat\';
+%% =========================================================================
+%% SECTION 3 — SELECT SNAPSHOT & PLOT CARTESIAN VELOCITY FIELD
+%% =========================================================================
+[~, it_snap] = min(abs(t_piv - t_snap_target));
+fprintf('\nSnapshot: t = %.2f s  (frame %d of %d)\n', t_piv(it_snap), it_snap, Nt);
 
-D_tmp = dir([dir_piv_long, '*.mat']);
-tmp   = load([dir_piv_long, D_tmp(1).name], 'compVel');
-DX    = tmp.compVel.DX;
-GS    = tmp.compVel.GS;
-clear tmp;
+% u(t, x, z)  →  [Nz x Nx] for plotting (z on y-axis, x on x-axis)
+u_cart = squeeze(STAT.u(it_snap, :, :));   % [Nz x Nx]
+w_cart = squeeze(STAT.v(it_snap, :, :));   % [Nz x Nx]
 
-% Load all longitudinal frames.
-% If process_one_directory_transverse_PIV works for longitudinal too, use it.
-% Otherwise replace with the appropriate loader.
-STAT = process_one_directory_transverse_PIV(dir_piv_long);
+% Surface elevation at this frame (interpolated onto PIV x-grid)
+[~, it_e] = min(abs(t_eta - t_piv(it_snap)));
+eta_snap = interp1(x_eta, eta(:, it_e), x_piv, 'linear', 'extrap')';  % [1 x Nx]
 
-% In the longitudinal (x-z) PIV plane:
-%   compVel.delx → along-wind (x)  → horizontal velocity u
-%   compVel.dely → vertical   (z)  → vertical velocity   w
-u_long = STAT.u;   % [Nt x Nx x Nz]  along-wind velocity
-w_long = STAT.v;   % [Nt x Nx x Nz]  vertical velocity
+figure('Name', sprintf('Sec 3 | Cartesian snapshot  t=%.1f s', t_piv(it_snap)), ...
+       'Position', [50 550 1200 380]);
+subplot(1,2,1);
+pcolor(x_piv*1e3, z_piv*1e3, u_cart); shading flat;
+hold on; plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 1.5);
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','reverse');
+title('u_{cart}  [m/s]');
 
-[Nt, Nx_piv, Nz_piv] = size(w_long);
+subplot(1,2,2);
+pcolor(x_piv*1e3, z_piv*1e3, w_cart); shading flat;
+hold on; plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 1.5);
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','reverse');
+title('w_{cart}  [m/s]');
+sgtitle(sprintf('Section 3 — Cartesian snapshot  t = %.1f s', t_piv(it_snap)));
+drawnow;
 
-% --- PIV coordinate vectors ---
-t_piv = t_image_offset + (0:Nt-1) / params.Fs;   % JFM time (s)
-
-% z: 0 at surface, negative downward
-z_piv = -(0:Nz_piv-1)' * DX;   % [Nz x 1] m
-
-% x: along-wind (relative to image, convert to physical if DX known)
-x_piv = (0:Nx_piv-1)' * DX;    % [Nx x 1] m  (relative to left edge of FOV)
-
-fprintf('Longitudinal PIV: Nt=%d, Nx=%d, Nz=%d, DX=%.4f m\n', Nt, Nx_piv, Nz_piv, DX);
-
-%% --- SELECT A SNAPSHOT ---
-% Choose a time in the developed LC turbulence phase.
-% t ~ 55 s is well into the Langmuir turbulence regime.
-t_snap = 55;
-[~, it_snap] = min(abs(t_piv - t_snap));
-fprintf('Selected snapshot: t = %.2f s (frame %d)\n', t_piv(it_snap), it_snap);
-
-% Extract single-frame Cartesian fields [Nz x Nx] (transpose from [Nx x Nz])
-u_cart = squeeze(u_long(it_snap, :, :))';   % [Nz x Nx]
-w_cart = squeeze(w_long(it_snap, :, :))';   % [Nz x Nx]
-
-% Surface elevation at this time step (interpolated from eta data)
-[~, it_eta] = min(abs(t_eta - t_piv(it_snap)));
-eta_snap = interp1(x_eta, eta(:, it_eta), x_piv, 'linear', 'extrap');
-eta_snap = eta_snap(:)';  % [1 x Nx]
-
-%% === STEP 1: WAVE-FOLLOWING COORDINATE TRANSFORM (WATER SIDE) ===
-% zeta: depth below local surface, positive downward.
-% Grid spacing matches PIV resolution, starting at surface.
-dz = abs(z_piv(2) - z_piv(1));
-zeta_vec = (0:dz:abs(z_piv(end)))';   % [Nz x 1] m
+%% =========================================================================
+%% SECTION 4 — WAVE-FOLLOWING COORDINATE TRANSFORM (WATER SIDE)
+%%   Air side (Fabio): z = +zeta + sum(a exp(ikx) exp(-k*zeta)),  zeta > 0 up
+%%   Water side (here): z = -zeta + sum(a exp(ikx) exp(-k*zeta)), zeta > 0 down
+%%   exp(-k*zeta) same: coordinate lines follow wave at surface, flatten at depth
+%% =========================================================================
+dz      = abs(z_piv(2) - z_piv(1));
+zeta_vec = (0 : dz : abs(z_piv(end)))';   % [Nz x 1]  depth below surface
 
 transfo = generate_transfo_water(eta_snap, x_piv, zeta_vec);
 
-% Transform velocity fields to wave-following coordinates
 u_wf = transform_field_to_wavefollowing(u_cart, z_piv, transfo);
 w_wf = transform_field_to_wavefollowing(w_cart, z_piv, transfo);
 
-fprintf('Wave-following transform done: %d x %d grid\n', size(u_wf));
+% ---- Plot 4a: wave-following velocity ----
+figure('Name', sprintf('Sec 4a | Wave-following snapshot  t=%.1f s', t_piv(it_snap)), ...
+       'Position', [50 450 1200 380]);
+subplot(1,2,1);
+pcolor(x_piv*1e3, -zeta_vec*1e3, u_wf); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)  [0=surface]'); set(gca,'YDir','normal');
+title('u(x,\zeta)  [m/s]');
 
-%% === STEP 2: PHASE & ENSEMBLE AVERAGING (all snapshots) ===
-% Bin each x-column of each frame by its wave phase, then average.
-% This is the Fabio approach (phiAvNensAv_fab) adapted for our data format.
+subplot(1,2,2);
+pcolor(x_piv*1e3, -zeta_vec*1e3, w_wf); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)'); set(gca,'YDir','normal');
+title('w(x,\zeta)  [m/s]');
+sgtitle(sprintf('Section 4a — Wave-following coordinates  t = %.1f s  (top = flattened surface)', t_piv(it_snap)));
+drawnow;
 
-Nbins = 180;  % phase bins (same as Fabio default)
-phase_edges = linspace(-pi, pi, Nbins + 1);
+% ---- Plot 4b: constant-zeta grid lines on Cartesian ----
+figure('Name', 'Sec 4b | Coordinate grid on Cartesian', 'Position', [50 350 800 450]);
+pcolor(x_piv*1e3, z_piv*1e3, w_cart); shading flat;
+colormap_bwr(); caxis_sym(gca); hold on;
+zeta_show  = [0, 0.001, 0.003, 0.007, 0.015, 0.04, 0.10];
+clr = winter(length(zeta_show));
+for k = 1:length(zeta_show)
+    [~, iz] = min(abs(zeta_vec - zeta_show(k)));
+    plot(x_piv*1e3, transfo.Z_grid(iz,:)*1e3, '-', 'Color', clr(k,:), 'LineWidth', 1.2);
+end
+plot(x_piv*1e3, eta_snap*1e3, 'k', 'LineWidth', 2);
+xlabel('x (mm)'); ylabel('z (mm)'); set(gca,'YDir','normal');
+colorbar;
+legend([{'w_{cart}', '\eta(x)'}; ...
+    arrayfun(@(z) sprintf('\\zeta=%.0fmm', z*1e3), zeta_show', 'Uni',0)], ...
+    'Location','southwest','FontSize',7);
+title('Section 4b — Constant-\zeta lines on Cartesian field');
+drawnow;
 
-% Accumulators for phase average and ensemble average
-u_phaseSum = zeros(length(zeta_vec), Nbins);
-w_phaseSum = zeros(length(zeta_vec), Nbins);
-phaseCounts = zeros(length(zeta_vec), Nbins);
+%% =========================================================================
+%% SECTION 5 — WAVE PHASE vs X
+%% =========================================================================
+figure('Name', 'Sec 5 | Wave phase vs x', 'Position', [50 280 900 300]);
+yyaxis left;
+plot(x_piv*1e3, transfo.phase, 'b-', 'LineWidth', 1.5);
+ylabel('Phase (rad)');
+ylim([-pi pi]);
+set(gca, 'YTick', [-pi -pi/2 0 pi/2 pi], ...
+         'YTickLabel', {'-\pi','-\pi/2','0','\pi/2','\pi'});
 
-u_ensembleSum = zeros(length(zeta_vec), 1);
-w_ensembleSum = zeros(length(zeta_vec), 1);
-ensembleCounts = zeros(length(zeta_vec), 1);
+yyaxis right;
+plot(x_piv*1e3, eta_snap*1e3, 'r-', 'LineWidth', 1);
+ylabel('\eta (mm)');
 
-fprintf('Computing phase & ensemble averages over %d frames...\n', Nt);
+xlabel('x (mm)'); grid on;
+legend('\phi(x)', '\eta(x)', 'Location','best');
+title('Section 5 — Wave phase from Hilbert transform');
+drawnow;
+
+%% =========================================================================
+%% SECTION 6 — PHASE & ENSEMBLE AVERAGES  (loop over all frames)
+%% =========================================================================
+Nbins       = 180;
+phase_edges = linspace(-pi, pi, Nbins+1);
+phase_ctr   = 0.5*(phase_edges(1:end-1)+phase_edges(2:end));
+Nz_wf       = length(zeta_vec);
+
+u_phSum = zeros(Nz_wf, Nbins);   w_phSum = zeros(Nz_wf, Nbins);
+phCount = zeros(Nz_wf, Nbins);
+u_enSum = zeros(Nz_wf, 1);       w_enSum = zeros(Nz_wf, 1);
+enCount = zeros(Nz_wf, 1);
+
+fprintf('Computing phase & ensemble averages (%d frames)...\n', Nt);
 for it = 1:Nt
-    % Extract Cartesian fields for this frame
-    u_t = squeeze(u_long(it, :, :))';   % [Nz x Nx]
-    w_t = squeeze(w_long(it, :, :))';
+    u_t = squeeze(STAT.u(it, :, :))';   % [Nz x Nx]
+    w_t = squeeze(STAT.v(it, :, :))';
 
-    % Surface elevation for this frame
-    [~, it_e] = min(abs(t_eta - t_piv(it)));
-    eta_t = interp1(x_eta, eta(:, it_e), x_piv, 'linear', 'extrap');
-    eta_t = eta_t(:)';
+    [~, ite] = min(abs(t_eta - t_piv(it)));
+    eta_t = interp1(x_eta, eta(:,ite), x_piv, 'linear','extrap')';
 
-    % Wave-following transform
-    transfo_t = generate_transfo_water(eta_t, x_piv, zeta_vec);
-    u_wf_t = transform_field_to_wavefollowing(u_t, z_piv, transfo_t);
-    w_wf_t = transform_field_to_wavefollowing(w_t, z_piv, transfo_t);
+    tf_t  = generate_transfo_water(eta_t, x_piv, zeta_vec);
+    u_t_wf = transform_field_to_wavefollowing(u_t, z_piv, tf_t);
+    w_t_wf = transform_field_to_wavefollowing(w_t, z_piv, tf_t);
 
-    % Phase at each x from Hilbert of this snapshot's eta
-    phase_t = transfo_t.phase;   % [1 x Nx]
-
-    % Bin by phase
-    bin_idx = discretize(phase_t, phase_edges);
+    bin_t = discretize(tf_t.phase, phase_edges);   % [1 x Nx]
 
     for ib = 1:Nbins
-        cols = find(bin_idx == ib);
+        cols = find(bin_t == ib);
         if isempty(cols), continue; end
-
-        u_chunk = u_wf_t(:, cols);
-        w_chunk = w_wf_t(:, cols);
-
-        u_phaseSum(:, ib) = nansum([u_phaseSum(:, ib), nansum(u_chunk, 2)], 2);
-        w_phaseSum(:, ib) = nansum([w_phaseSum(:, ib), nansum(w_chunk, 2)], 2);
-        phaseCounts(:, ib) = phaseCounts(:, ib) + sum(isfinite(u_chunk), 2);
+        u_phSum(:,ib) = nansum([u_phSum(:,ib), nansum(u_t_wf(:,cols),2)], 2);
+        w_phSum(:,ib) = nansum([w_phSum(:,ib), nansum(w_t_wf(:,cols),2)], 2);
+        phCount(:,ib) = phCount(:,ib) + sum(isfinite(u_t_wf(:,cols)), 2);
     end
 
-    % Ensemble sum (all columns regardless of phase)
-    u_ensembleSum = u_ensembleSum + nansum(u_wf_t, 2);
-    w_ensembleSum = w_ensembleSum + nansum(w_wf_t, 2);
-    ensembleCounts = ensembleCounts + sum(isfinite(u_wf_t), 2);
+    u_enSum = u_enSum + nansum(u_t_wf, 2);
+    w_enSum = w_enSum + nansum(w_t_wf, 2);
+    enCount = enCount + sum(isfinite(u_t_wf), 2);
 
-    if mod(it, round(Nt/10)) == 0
-        fprintf('  %d%% done\n', round(100*it/Nt));
+    if mod(it, max(1,round(Nt/10))) == 0
+        fprintf('  %d%%\n', round(100*it/Nt));
     end
 end
 
-% --- Averages ---
-u_phaseAvg    = u_phaseSum ./ phaseCounts;         % [Nz x Nbins]
-w_phaseAvg    = w_phaseSum ./ phaseCounts;
-u_ensembleAvg = u_ensembleSum ./ ensembleCounts;   % [Nz x 1]
-w_ensembleAvg = w_ensembleSum ./ ensembleCounts;
+u_phAvg = u_phSum ./ phCount;         % [Nz x Nbins]
+w_phAvg = w_phSum ./ phCount;
+u_enAvg = u_enSum ./ enCount;         % [Nz x 1]
+w_enAvg = w_enSum ./ enCount;
 
-fprintf('Phase average: %d bins, min %d max %d counts per bin\n', ...
-    Nbins, min(phaseCounts(:)), max(phaseCounts(:)));
+% ---- Plot 6a: phase-averaged fields ----
+figure('Name', 'Sec 6a | Phase average', 'Position', [50 210 1200 380]);
+subplot(1,2,1);
+pcolor(phase_ctr, -zeta_vec*1e3, u_phAvg); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+set(gca, 'YDir','normal', 'XTick',[-pi -pi/2 0 pi/2 pi], ...
+         'XTickLabel',{'-\pi','-\pi/2','0','\pi/2','\pi'});
+xlabel('Phase (rad)'); ylabel('-\zeta (mm)');
+title('<u>(\zeta,\phi)  [m/s]');
 
-%% === STEP 3: DECOMPOSE SNAPSHOT INTO TURBULENT & WAVE-COHERENT ===
-% For the selected snapshot:
-%   turbulent:      u' = u - <u>(phase)      (subtract phase average)
-%   wave-coherent:  u~ = <u>(phase) - <u>    (phase average minus ensemble)
+subplot(1,2,2);
+pcolor(phase_ctr, -zeta_vec*1e3, w_phAvg); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+set(gca, 'YDir','normal', 'XTick',[-pi -pi/2 0 pi/2 pi], ...
+         'XTickLabel',{'-\pi','-\pi/2','0','\pi/2','\pi'});
+xlabel('Phase (rad)'); ylabel('-\zeta (mm)');
+title('<w>(\zeta,\phi)  [m/s]');
+sgtitle('Section 6a — Phase-averaged velocity (wave-following coords)');
+drawnow;
 
-phase_snap = transfo.phase;
-bin_snap = discretize(phase_snap, phase_edges);
+% ---- Plot 6b: ensemble-averaged profiles ----
+figure('Name', 'Sec 6b | Ensemble average', 'Position', [700 210 550 420]);
+subplot(1,2,1);
+plot(u_enAvg, -zeta_vec*1e3, 'b-', 'LineWidth', 1.5);
+xlabel('<u>_{ens} (m/s)'); ylabel('-\zeta (mm)');
+title('Ensemble-averaged u'); grid on; set(gca,'YDir','normal');
 
-u_turb = NaN(size(u_wf));
-w_turb = NaN(size(w_wf));
-u_wave = NaN(size(u_wf));
-w_wave = NaN(size(w_wf));
+subplot(1,2,2);
+plot(w_enAvg, -zeta_vec*1e3, 'r-', 'LineWidth', 1.5);
+xlabel('<w>_{ens} (m/s)'); ylabel('-\zeta (mm)');
+title('Ensemble-averaged w'); grid on; set(gca,'YDir','normal');
+sgtitle('Section 6b — Ensemble average (all frames, all phases)');
+drawnow;
 
-for ix = 1:Nx_piv
+%% =========================================================================
+%% SECTION 7 — TRIPLE DECOMPOSITION FOR THE SELECTED SNAPSHOT
+%%   Turbulent:     u' = u(x,zeta) - <u>_phi(zeta, phi(x))
+%%   Wave-coherent: u~ = <u>_phi(zeta, phi(x)) - <u>_ens(zeta)
+%% =========================================================================
+bin_snap = discretize(transfo.phase, phase_edges);
+
+u_turb = NaN(size(u_wf));   w_turb = NaN(size(w_wf));
+u_wave = NaN(size(u_wf));   w_wave = NaN(size(w_wf));
+
+for ix = 1:Nx
     ib = bin_snap(ix);
     if isnan(ib), continue; end
-
-    u_turb(:, ix) = u_wf(:, ix) - u_phaseAvg(:, ib);
-    w_turb(:, ix) = w_wf(:, ix) - w_phaseAvg(:, ib);
-
-    u_wave(:, ix) = u_phaseAvg(:, ib) - u_ensembleAvg;
-    w_wave(:, ix) = w_phaseAvg(:, ib) - w_ensembleAvg;
+    u_turb(:,ix) = u_wf(:,ix) - u_phAvg(:,ib);
+    w_turb(:,ix) = w_wf(:,ix) - w_phAvg(:,ib);
+    u_wave(:,ix) = u_phAvg(:,ib) - u_enAvg;
+    w_wave(:,ix) = w_phAvg(:,ib) - w_enAvg;
 end
 
-%% === STEP 4: INVERSE TRANSFORM TURBULENT FIELD BACK TO CARTESIAN ===
-u_turb_cart = inverse_transform_to_cartesian(u_turb, z_piv, transfo);
-w_turb_cart = inverse_transform_to_cartesian(w_turb, z_piv, transfo);
-u_wave_cart = inverse_transform_to_cartesian(u_wave, z_piv, transfo);
-w_wave_cart = inverse_transform_to_cartesian(w_wave, z_piv, transfo);
+% ---- Plot 7: 2×2 decomposition ----
+figure('Name', sprintf('Sec 7 | Decomposition  t=%.1f s', t_piv(it_snap)), ...
+       'Position', [50 50 1400 700]);
 
-%% --- SAVE ---
+subplot(2,2,1);
+pcolor(x_piv*1e3, -zeta_vec*1e3, u_turb); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)'); set(gca,'YDir','normal');
+title("u' = u - <u>_\phi  (turbulent)");
+
+subplot(2,2,2);
+pcolor(x_piv*1e3, -zeta_vec*1e3, w_turb); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)'); set(gca,'YDir','normal');
+title("w' = w - <w>_\phi  (turbulent)");
+
+subplot(2,2,3);
+pcolor(x_piv*1e3, -zeta_vec*1e3, u_wave); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)'); set(gca,'YDir','normal');
+title('u~ = <u>_\phi - <u>_{ens}  (wave-coherent)');
+
+subplot(2,2,4);
+pcolor(x_piv*1e3, -zeta_vec*1e3, w_wave); shading flat;
+colorbar; colormap_bwr(); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('-\zeta (mm)'); set(gca,'YDir','normal');
+title('w~ = <w>_\phi - <w>_{ens}  (wave-coherent)');
+
+sgtitle(sprintf('Section 7 — Triple decomposition  t = %.1f s', t_piv(it_snap)));
+drawnow;
+
+%% =========================================================================
+%% SAVE
+%% =========================================================================
 save('longitudinal_wave_decomposition.mat', ...
-    'u_cart', 'w_cart', 'u_wf', 'w_wf', ...
-    'u_phaseAvg', 'w_phaseAvg', 'u_ensembleAvg', 'w_ensembleAvg', ...
-    'u_turb', 'w_turb', 'u_wave', 'w_wave', ...
-    'u_turb_cart', 'w_turb_cart', 'u_wave_cart', 'w_wave_cart', ...
-    'transfo', 'zeta_vec', 'z_piv', 'x_piv', 't_piv', 'params', ...
-    'it_snap', 'Nbins', 'phase_edges', 'phaseCounts');
+    'u_cart','w_cart','u_wf','w_wf', ...
+    'u_phAvg','w_phAvg','u_enAvg','w_enAvg', ...
+    'u_turb','w_turb','u_wave','w_wave', ...
+    'transfo','zeta_vec','z_piv','x_piv','t_piv', ...
+    'it_snap','Nbins','phase_edges','phCount');
 disp('Saved longitudinal_wave_decomposition.mat');
 
-%% === PLOTS ===
-plot_wave_decomposition(u_cart, w_cart, u_wf, w_wf, ...
-    u_phaseAvg, w_phaseAvg, u_ensembleAvg, w_ensembleAvg, ...
-    u_turb, w_turb, u_wave, w_wave, ...
-    transfo, zeta_vec, z_piv, x_piv, t_piv(it_snap), ...
-    Nbins, phase_edges);
+%% =========================================================================
+%% LOCAL HELPERS
+%% =========================================================================
+function colormap_bwr()
+% Blue–white–red diverging colormap applied to current axes.
+n = 256; h = floor(n/2);
+r = [linspace(0,1,h), ones(1,n-h)];
+g = [linspace(0,1,h), linspace(1,0,n-h)];
+b = [ones(1,h),       linspace(1,0,n-h)];
+colormap(gca, [r' g' b']);
+end
+
+function caxis_sym(ax)
+% Symmetric colour limits around zero.
+cl = caxis(ax);
+mx = max(abs(cl));
+if mx > 0, caxis(ax, [-mx mx]); end
+end
