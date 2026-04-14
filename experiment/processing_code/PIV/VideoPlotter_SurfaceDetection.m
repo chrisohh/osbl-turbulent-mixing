@@ -8,6 +8,11 @@ LONG = '/media/surflab/LC_Working24/LC/FabMarcNovDec2014/data/Longitudinal/PIVdt
 DIRS = dir(LONG);
 DIRS = DIRS(3:end);
 
+Fs_PIV       = 7.2;        % Hz — frame rate between consecutive pairs
+delay        = 73 + 5;     % s  — imaging starts this many s after trigger
+t_wind_onset = 40;         % s  — trigger to wind onset
+DX           = 1/17697.69; % m per pixel
+
 for ii = 1%:length(DIRS)
 
 exp_name = DIRS(ii).name;
@@ -38,15 +43,21 @@ for image_pair_number = 0:number_of_pair-1
          sprintf(['%0' num2str(num_of_digits) 'd'], image_pair_number) '_a.mat'], ...
         findMask = false);
 
+    [h_s, w_s] = size(imSurfa.ImgScaledToPIVSmallCrop);
+    t_since_wind = image_pair_number / Fs_PIV + delay - t_wind_onset;
+
     hold off
-    imagesc(imSurfa.ImgScaledToPIVSmallCrop, [0, 300])
+    imagesc((1:w_s)*DX*1e3, (1:h_s)*DX*1e3, imSurfa.ImgScaledToPIVSmallCrop, [0, 300])
     colormap bone
     hold on
-    plot(imSurfa.surfaceSurfImgScaled, '-', 'Color', cl, 'LineWidth', 1.5)
-    plot(imSurfa.surface_raw, '-r', 'LineWidth', 1.5)
+    plot((1:length(imSurfa.surfaceSurfImgScaled))*DX*1e3, ...
+         imSurfa.surfaceSurfImgScaled*DX*1e3, '-', 'Color', cl, 'LineWidth', 1.5)
+    plot((1:length(imSurfa.surface_raw))*DX*1e3, ...
+         imSurfa.surface_raw*DX*1e3, '-r', 'LineWidth', 1.5)
     daspect([1, 1, 1])
-    title(sprintf('%s  Pair %d / %d', exp_name, image_pair_number, number_of_pair-1), ...
-        'Interpreter', 'none')
+    xlabel('x (mm)'); ylabel('z (mm)')
+    title(sprintf('%s  Frame %d a,  t = %.2f s since wind start', ...
+        exp_name, image_pair_number, t_since_wind), 'Interpreter', 'none')
 
     drawnow
     Frame = getframe(gcf);
