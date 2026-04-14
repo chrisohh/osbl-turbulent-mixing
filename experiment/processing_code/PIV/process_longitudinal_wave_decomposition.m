@@ -249,20 +249,22 @@ end
 % ---- Diagnostic plot: raw velocity with NaN pattern ---------------------
 figure('Name', 'Sec 2b | Masking diagnostic', 'Position', [50 600 1000 350]);
 it_diag = round(Nt/2);
-u_diag = squeeze(STAT.u(it_diag, :, :))';  % [Nz x Nx]
+u_diag = squeeze(STAT.u(it_diag, :, :));  % [Nz x Nx]
 
 subplot(1,2,1);
 imagesc(x_piv*1e3, z_piv*1e3, u_diag);
 set(gca, 'YDir', 'reverse');
-colorbar; colormap_bwr(); caxis_sym(gca);
-xlabel('x (mm)'); ylabel('z (mm, +down)');
+colorbar; colormap(brewermap([],'Spectral')); caxis_sym(gca);
+xlabel('x (mm)'); ylabel('z depth (mm)');
 title(sprintf('u  (frame %d)', it_diag));
+
+hold on;plot(ETA_R2_EXP1.x*1e3,-(ETA_R2_EXP1.ETA(:,it_diag)*1e3-103.42)+25.243);
 
 subplot(1,2,2);
 imagesc(x_piv*1e3, z_piv*1e3, double(isnan(u_diag)));
 set(gca, 'YDir', 'reverse');
 colormap(gca, [1 1 1; 0.8 0.2 0.2]);  % white=valid, red=NaN
-xlabel('x (mm)'); ylabel('z (mm, +down)');
+xlabel('x (mm)'); ylabel('z depth (mm)');
 title('NaN mask (red = NaN = masked out)');
 
 sgtitle(sprintf('Section 2b — Masking diagnostic  (frame %d of %d)', it_diag, Nt));
@@ -343,8 +345,15 @@ drawnow;
 %%   Water side (here): z = -zeta + sum(a exp(ikx) exp(-k*zeta)), zeta > 0 down
 %%   exp(-k*zeta) same: coordinate lines follow wave at surface, flatten at depth
 %% =========================================================================
-dz      = abs(z_piv(2) - z_piv(1));
-zeta_vec = (0 : dz : abs(z_piv(end)))';   % [Nz x 1]  depth below surface
+% Phase-average subtraction (remove_wave_phase_avg.m)
+% 
+% Assign wave phase φ(t) from longitudinal Hilbert at x=12m
+% Bin all transverse frames by phase, average within each bin → <v,w>(y, z, φ)
+% Subtract phase average from each frame
+% 
+% 
+% dz      = abs(z_piv(2) - z_piv(1));
+% zeta_vec = (0 : dz : abs(z_piv(end)))';   % [Nz x 1]  depth below surface
 
 % Use mean-zero eta for the wave-following transform.
 % The DC offset (eta_mean) shifts z=0 but doesn't create a wavy surface to flatten.
