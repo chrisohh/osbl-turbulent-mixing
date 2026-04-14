@@ -43,6 +43,7 @@ for image_pair_number = 0:number_of_pair-1
     [h_s, w_s] = size(imSurfa.ImgScaledToPIVSmallCrop);
     t_since_wind = image_pair_number / Fs_PIV + delay - t_wind_onset;
 
+    figure(fig);
     hold off
     imagesc((1:w_s)*DX*1e3, (1:h_s)*DX*1e3, imSurfa.ImgScaledToPIVSmallCrop, [0, 300])
     colormap bone
@@ -57,7 +58,7 @@ for image_pair_number = 0:number_of_pair-1
         exp_name, image_pair_number, t_since_wind), 'Interpreter', 'none')
     set(gca,'fontsize',15);axis equal;axis tight
     drawnow
-    Frame = getframe(gcf);
+    Frame = getframe(fig);
     % Lock frame size to first frame (ImgScaledToPIVSmallCrop size varies
     % slightly between frames due to surface-dependent cropping)
     if image_pair_number == 0
