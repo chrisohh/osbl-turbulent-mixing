@@ -26,11 +26,11 @@ end
 videoFile = [videoPath exp_name '_SurfaceDetection.mp4'];
 v = VideoWriter(videoFile, 'MPEG-4');
 v.FrameRate = Fs_PIV;
-v.Quality = 100;
+v.Quality = 95;
 open(v);
 
 % Figure setup
-fig = figure('Position', [100 100 1000 800]);
+fig = figure('Position', [100 100 1200 800]);
 colormap bone
 cl = [1, 0.4, 0.4];
 
@@ -48,9 +48,9 @@ for image_pair_number = 0:number_of_pair-1
     colormap bone
     hold on
     plot((1:length(imSurfa.surfaceSurfImgScaled))*DX*1e3, ...
-         imSurfa.surfaceSurfImgScaled*DX*1e3, '-', 'Color', cl, 'LineWidth', 1)
+         imSurfa.surfaceSurfImgScaled*DX*1e3, '-', 'Color', cl, 'LineWidth', 1.5)
     plot((1:length(imSurfa.surface_raw))*DX*1e3, ...
-         imSurfa.surface_raw*DX*1e3, '-r', 'LineWidth', 1)
+         imSurfa.surface_raw*DX*1e3, '-r', 'LineWidth', 1.5)
     daspect([1, 1, 1])
     xlabel('x (mm)'); ylabel('z (mm)')
     title(sprintf('%s  Frame %d_a,  t = %.1f s from wind start', ...
@@ -64,6 +64,7 @@ for image_pair_number = 0:number_of_pair-1
 end
 
 close(v);
+close(fig);
 disp(['Video saved: ' videoFile])
 
 end
