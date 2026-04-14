@@ -58,6 +58,13 @@ for image_pair_number = 0:number_of_pair-1
     set(gca,'fontsize',15);axis equal;axis tight
     drawnow
     Frame = getframe(gcf);
+    % Lock frame size to first frame (ImgScaledToPIVSmallCrop size varies
+    % slightly between frames due to surface-dependent cropping)
+    if image_pair_number == 0
+        frame_size = size(Frame.cdata(:,:,1));
+    else
+        Frame.cdata = imresize(Frame.cdata, frame_size);
+    end
     writeVideo(v, Frame);
 
     disp(['Frame ' num2str(image_pair_number) ' of ' num2str(number_of_pair-1)])
