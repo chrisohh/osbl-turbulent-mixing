@@ -39,13 +39,20 @@ load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' pair_str '_b.mat']);
 IM_b = double(imgPiv);
 [h, w] = size(IM_a);
 
-% Normalize to [0, 1] for RGB composite
-IM_a_n = IM_a / max(IM_a(:));
-IM_b_n = IM_b / max(IM_b(:));
 
 %% =========================================================================
 %% FIGURE 1 — FULL IMAGE: RED/CYAN OVERLAY + INTERROGATION WINDOWS
 %% =========================================================================
+% % Normalize to [0, 1] for RGB composite
+% IM_a_n = IM_a / max(IM_a(:));
+% IM_b_n = IM_b / max(IM_b(:));
+
+% For the RGB composite (Figures 1 & 2), adjust per-channel before building composite:
+IM_a_n = IM_a / prctile(IM_a(:), 99);  % instead of max — clips top 1% to white
+IM_b_n = IM_b / prctile(IM_b(:), 99);
+IM_a_n = min(IM_a_n, 1);  % clamp to [0, 1]
+IM_b_n = min(IM_b_n, 1);
+
 % Red/cyan composite: A in red, B in cyan (green+blue)
 composite = cat(3, IM_a_n, IM_b_n, IM_b_n);
 
@@ -54,7 +61,9 @@ cx = round(w/2);
 cz = round(h * 0.6);  % 60% down — should be well below surface
 
 figure('Name', 'PIV Particle Check — Full View', 'Position', [50 100 1400 800]);
-imagesc(composite)
+imagesc(composite); axis equal;axis tight
+% For the grayscale image (Figure 3):
+% imagesc(...); clim([0, prctile(IM_a(:), 95)])
 hold on
 
 % Draw largest and smallest interrogation windows

@@ -278,3 +278,148 @@ axis equal;axis tight
 ylim([z_ax(1), z_ax(last_valid_row)])
 xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
 drawnow
+
+
+%% =========================================================================
+%% LOOP — compute all snapshots, save, accumulate ensemble average
+%% =========================================================================
+raw_files = dir([load_path '/PIVRaw/PIV/' exp_name '_Piv_*_a.mat']);
+N_frames  = length(raw_files);
+fprintf('Found %d frames.\n', N_frames);
+
+save_path = [load_path '/PIVMat/Chris_recompute/'];
+if ~exist(save_path, 'dir'), mkdir(save_path); end
+
+% running 2D accumulation — no full stack in memory
+ensembleSum_u   = zeros(size(u_res));
+ensembleSum_w   = zeros(size(w_res));
+ensembleStats_u = zeros(size(u_res));
+ensembleStats_w = zeros(size(w_res));
+N_processed = 0;
+
+for ff = 1:N_frames
+    tok = regexp(raw_files(ff).name, '_Piv_(\d+)_a\.mat$', 'tokens');
+    pair_num = str2double(tok{1}{1});
+    ps = sprintf(['%0' num2str(num_of_digits) 'd'], pair_num);
+
+    % --- load or compute compVel ---
+    cf = [load_path '/PIVMat/' exp_name '_compVel_' ps '.mat'];
+    if exist(cf, 'file')
+        cV = load(cf);
+        cV.compVel.DX = DX; cV.compVel.DT = DT;
+        imSa = FindSurfaceCapillary( ...
+            [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_a.mat'], ...
+            findMask = true);
+    else
+        fprintf('  computing compVel for pair %s...\n', ps);
+        imSa = FindSurfaceCapillary( ...
+            [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_a.mat'], ...
+            findMask = true);
+        imSb = FindSurfaceCapillary( ...
+            [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_b.mat'], ...
+            findMask = true);
+        load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_a.mat']); IMa = imgPiv;
+        load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_b.mat']); IMb = imgPiv;
+        cV.compVel = ComputeVelocities_Quick_NoFilt_Deform_Water( ...
+            IMa, IMb, imSa.mask, imSb.mask, IntrWndw, GrdSpc);
+        cV.compVel.DX = DX; cV.compVel.DT = DT;
+        save(cf, '-struct', 'cV');
+    end
+
+    surf_piv_f = imSa.surfacePIVImg;
+
+    % --- velocity: outlier removal + smoothing ---
+    dx_f = smoothn(removeOutliers(cV.compVel.delta_x .* cV.compVel.Mask, cV.compVel.dcor), 0.4, 'robust');
+    dz_f = smoothn(removeOutliers(cV.compVel.delta_z .* cV.compVel.Mask, cV.compVel.dcor), 0.4, 'robust');
+    uf = dx_f .* cV.compVel.Mask .* DX/DT;
+    wf = dz_f .* cV.compVel.Mask .* DX/DT;
+
+    % --- wave-following transform ---
+    pR.zPIV = cV.compVel.zPIV; pR.xPIV = cV.compVel.xPIV;
+    pR.GS   = cV.compVel.GS;   pR.mask  = cV.compVel.Mask;
+    tf     = generateTransfo_LC_noLFV_2023(cV.compVel, surf_piv_f, pR);
+    SU_f   = tf.SU(2:end,:)   + SU_OFFSET;
+    ORBX_f = tf.ORBX(2:end,:);
+    ORBZ_f = tf.ORBZ(2:end,:);
+    pR.pf_surf = SU_f(1,:);
+
+    iu = transformVelField_decay_forFab(uf, pR, SU_f);
+    iw = transformVelField_decay_forFab(wf, pR, SU_f);
+
+    u_res_f = iu - ORBX_f;   % mean + turb, wave-following
+    w_res_f = iw - ORBZ_f;
+
+    % --- save snapshot ---
+    methodA.u_res       = single(u_res_f);
+    methodA.w_res       = single(w_res_f);
+    methodA.Surface_PIV = surf_piv_f;
+    save([save_path exp_name '_methodA_' ps '.mat'], 'methodA');
+
+    % --- accumulate ensemble average ---
+    valid_u = isfinite(u_res_f);
+    valid_w = isfinite(w_res_f);
+    ensembleSum_u(valid_u)   = ensembleSum_u(valid_u)   + u_res_f(valid_u);
+    ensembleSum_w(valid_w)   = ensembleSum_w(valid_w)   + w_res_f(valid_w);
+    ensembleStats_u          = ensembleStats_u + valid_u;
+    ensembleStats_w          = ensembleStats_w + valid_w;
+    N_processed = N_processed + 1;
+
+    if mod(ff, 50) == 0
+        fprintf('  processed %d / %d frames\n', ff, N_frames);
+    end
+end
+
+%% =========================================================================
+%% MEAN + TURBULENCE
+%% =========================================================================
+u_mean_wf = ensembleSum_u ./ ensembleStats_u;  % [Nz x Nx] time-mean, wave-following
+w_mean_wf = ensembleSum_w ./ ensembleStats_w;
+
+fprintf('Ensemble average complete over %d frames.\n', N_processed);
+
+% plot mean
+figure;
+subplot(2,1,1)
+imagesc(x*1e3, z_ax, u_mean_wf)
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (mm)'); ylabel('depth (mm)')
+title(sprintf('u mean — %d frames (m/s)', N_processed))
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+clim([-0.01, 0.12])
+
+subplot(2,1,2)
+imagesc(x*1e3, z_ax, w_mean_wf)
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (mm)'); ylabel('depth (mm)')
+title(sprintf('w mean — %d frames (m/s)', N_processed))
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+clim([-0.04, 0.04])
+drawnow
+
+% depth profile (x+t average) — useful for turbulence statistics
+u_mean_profile = nanmean(u_mean_wf, 2);  % [Nz x 1]
+w_mean_profile = nanmean(w_mean_wf, 2);
+
+fprintf('\nDone. Snapshots saved to %s\n', save_path);
+fprintf('Variables: u_mean_wf, w_mean_wf, u_mean_profile, w_mean_profile\n');
+
+%% =========================================================================
+%% STEP 6 — TRANSFORM RESIDUAL BACK TO CARTESIAN
+%% =========================================================================
+u_turb_cart = reverseTransformVelField_decay_forFab(u_turb, pivRes, SU);
+w_turb_cart = reverseTransformVelField_decay_forFab(w_turb, pivRes, SU);
+
+figure(7);
+
+subplot(1,2,1)
+imagesc(u_turb_cart * DX/DT); colorbar; colormap gray
+title('u'' (back to Cartesian)')
+
+subplot(1,2,2)
+imagesc(w_turb_cart * DX/DT); colorbar; colormap gray
+title('w'' (back to Cartesian)')
+
+sgtitle(sprintf('Step 6: Cartesian comparison frame %s', pair_str))
+drawnow
