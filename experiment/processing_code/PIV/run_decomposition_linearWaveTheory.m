@@ -17,9 +17,9 @@ rootpath = 'C:\Users\airsealab\Documents\GitHub';
 % rootpath = 'D:\Scripps';
 
 % Add paths to Fabrice's functions
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\');
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\');
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\');
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
 ii = 4;                     % experiment index
 image_pair_number = 216;    % sanity-check frame
@@ -35,6 +35,7 @@ DIRS = DIRS(3:end);
 exp_name = DIRS(ii).name;
 num_of_digits = 3;
 load_path = [LONG exp_name];
+
 pair_str = sprintf(['%0' num2str(num_of_digits) 'd'], image_pair_number);
 
 fprintf('Experiment: %s   Pair: %s\n', exp_name, pair_str);
@@ -93,7 +94,11 @@ drawnow
 IntrWndw = [256 128 64 32 16 8];
 GrdSpc   = [128 64 32 16 8 4];
 
-compvel_file = [load_path '/PIVMat/' exp_name '_compVel_' pair_str '.mat'];
+chris_path = [load_path '/Chris_recompute/'];
+piv_save   = [chris_path 'PIVMat/'];
+turb_save  = [chris_path 'PIVMat_TURB/'];
+
+compvel_file = [piv_save exp_name '_compVel_' pair_str '.mat'];
 if exist(compvel_file, 'file')
     fprintf('Loading compVel from %s\n', compvel_file);
     load(compvel_file);
@@ -125,6 +130,7 @@ u=delta_x_smooth.* compVel.Mask.*DX/DT;
 w=delta_z_smooth.* compVel.Mask.*DX/DT;
 
 figure;
+subplot(1,2,1)
 imagesc(x, z, u)
 colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('z (m)')
@@ -132,7 +138,7 @@ title('u (m/s)')
 daspect([1,1,1])
 clim([-0.01,0.12])
 
-figure;
+subplot(1,2,2)
 imagesc(x, z, w)
 colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('z (m)')
@@ -171,19 +177,19 @@ fprintf('SU size: %d x %d   ORBX size: %d x %d\n', size(SU), size(ORBX));
 
 % --- Plot SU grid lines on Cartesian velocity ---
 figure;
-imagesc(x* 1e3,z* 1e3,u)
+imagesc(x,z,u)
 colorbar; colormap gray; hold on
 
 % Plot every 20th constant-zeta line
 n_su_lines = size(SU, 1);
 line_skip = max(1, round(n_su_lines / 15));
 for iz = 1:line_skip:n_su_lines
-    plot((1:size(SU,2))* compVel.GS*  DX * 1e3, SU(iz,:) * DX * 1e3, '-r', 'LineWidth', 0.5)
+    plot((1:size(SU,2))* compVel.GS*  DX, SU(iz,:) * DX, '-r', 'LineWidth', 0.5)
 end
 % Surface line
-plot((1:length(Surface_PIV))*DX*1e3, Surface_PIV*DX*1e3, '-', 'Color', cl, 'LineWidth', 2)
+plot((1:length(Surface_PIV))*DX, Surface_PIV*DX, '-r', 'LineWidth', 0.5)
 
-xlabel('x (mm)'); ylabel('z (mm)')
+xlabel('x (m)'); ylabel('z (m)')
 daspect([1,1,1])
 title(sprintf('Constant-\\zeta lines on u (m/s) frame %s', pair_str))
 drawnow
@@ -199,54 +205,58 @@ intrp_w = transformVelField_decay_forFab(w, pivRes, SU);
 last_valid_row = find(all(~isnan(intrp_u), 2), 1, 'last');
 
 % rows of intrp_u correspond to altitude(2:end) = compVel.zPIV - GS/2
-z_ax = (compVel.zPIV - compVel.GS/2) * DX * 1e3;  % mm
+z_ax = (compVel.zPIV - compVel.GS/2) * DX;  % m
 
 figure;
 subplot(1,2,1)
-imagesc(x*1e3,z_ax,intrp_u)
+imagesc(x,z_ax,intrp_u)
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (levels)')
 title('u in wave-following (m/s)')
 clim([-0.01,0.12])
 axis equal;axis tight
 ylim([z_ax(1), z_ax(last_valid_row)])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 
 subplot(1,2,2)
-imagesc(x*1e3,z_ax,intrp_w)
+imagesc(x,z_ax,intrp_w)
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (levels)')
 title('w in wave-following (m/s)')
 clim([-0.04,0.04])
 sgtitle(sprintf('Wave-following velocity frame %s', pair_str))
 axis equal;axis tight
 ylim([z_ax(1), z_ax(last_valid_row)])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 drawnow
 
 %% =========================================================================
 %% STEP 4 — METHOD A ORBITALS
 %% =========================================================================
+ % Convert pixel/frame -> m/s
+    ORBX_ms = ORBX * DX / DT;
+    ORBZ_ms = ORBZ * DX / DT;
+
 figure;
-subplot(2,1,1)
-imagesc(x*1e3,z_ax,ORBX * DX/DT)
+subplot(1,2,1)
+imagesc(x,z_ax,ORBX * DX/DT)
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (m)')
 title('u orbital (m/s)')
 axis equal;axis tight
-clim([-0.05,0.05])
-ylim([0,20])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+clim([-0.01,0.12])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 
-subplot(2,1,2)
-imagesc(x*1e3,z_ax,ORBZ * DX/DT)
+subplot(1,2,2)
+imagesc(x,z_ax,ORBZ * DX/DT)
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (m)')
 title('w orbital (m/s)')
 axis equal;axis tight
-clim([-0.05,0.05])
-ylim([0,20])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+clim([-0.04,0.04])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 
 sgtitle(sprintf('linear wave theory orbital velocities frame %s', pair_str))
 drawnow
@@ -254,27 +264,132 @@ drawnow
 %% =========================================================================
 %% STEP 5 — SUBTRACT ORBITALS aka RESIDUAL
 %% =========================================================================
-u_res = intrp_u - ORBX;
-w_res = intrp_w - ORBZ;
+u_res = intrp_u - ORBX* DX/DT;
+w_res = intrp_w - ORBZ* DX/DT;
 
 figure(6); clf;
-subplot(1,2,1)
-imagesc(u_res * DX/DT);
+subplot(3,2,1)
+imagesc(x,z_ax,intrp_u);
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (m)')
+title('u mean (m/s)')
+axis equal;axis tight
+clim([-0.01,0.12])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
+
+subplot(3,2,2)
+imagesc(x,z_ax,intrp_w);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('\zeta (m)')
+title('w mean (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
+
+subplot(3,2,3)
+imagesc(x,z_ax,ORBX_ms);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('\zeta (m)')
+title('u orbital (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
+
+subplot(3,2,4)
+imagesc(x,z_ax,ORBZ_ms);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('\zeta (m)')
+title('w orbital (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+ylim([z_ax(1), z_ax(last_valid_row)])
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
+
+subplot(3,2,5)
+imagesc(x,z_ax,u_res);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('\zeta (m)')
 title('u (mean + turb) (m/s)')
 axis equal;axis tight
- clim([-0.1,0.1])
+clim([-0.01,0.12])
 ylim([z_ax(1), z_ax(last_valid_row)])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 
-subplot(1,2,2)
-imagesc(w_res * DX/DT);
+subplot(3,2,6)
+imagesc(x,z_ax,w_res);
 colorbar; colormap(gca, brewermap([],'Spectral'))
-xlabel('x (mm)'); ylabel('\zeta (levels)')
+xlabel('x (m)'); ylabel('\zeta (m)')
 title('w (mean + turb) (m/s)')
 axis equal;axis tight
- clim([-0.1,0.1])
+clim([-0.04,0.04])
 ylim([z_ax(1), z_ax(last_valid_row)])
-xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX * 1e3)
-drawnow
+xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
+
+set(gcf,'Color','white')
+
+%% Transform wave following frame back to lab frame
+u_res_wf = reverseTransformVelField_decay_forFab( u_res, pivRes, SU );
+w_res_wf = reverseTransformVelField_decay_forFab( w_res, pivRes, SU );
+u_orb_wf = reverseTransformVelField_decay_forFab( ORBX_ms, pivRes, SU );
+w_orb_wf = reverseTransformVelField_decay_forFab( ORBZ_ms, pivRes, SU );
+u_mean_wf = reverseTransformVelField_decay_forFab( intrp_u, pivRes, SU );
+w_mean_wf = reverseTransformVelField_decay_forFab( intrp_w, pivRes, SU );
+
+figure(7); clf;
+subplot(3,2,1)
+imagesc(x,z,u_mean_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('u mean (m/s)')
+axis equal;axis tight
+clim([-0.01,0.12])
+
+subplot(3,2,2)
+imagesc(x,z,w_mean_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('w mean (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+
+
+subplot(3,2,3)
+imagesc(x,z,u_orb_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('u orbital (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+
+
+subplot(3,2,4)
+imagesc(x,z,w_orb_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('w orbital (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+
+
+subplot(3,2,5)
+imagesc(x,z,u_res_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('u (mean + turb) (m/s)')
+axis equal;axis tight
+clim([-0.01,0.12])
+
+
+subplot(3,2,6)
+imagesc(x,z,w_res_wf);
+colorbar; colormap(gca, brewermap([],'Spectral'))
+xlabel('x (m)'); ylabel('z (m)')
+title('w (mean + turb) (m/s)')
+axis equal;axis tight
+clim([-0.04,0.04])
+
+set(gcf,'Position',[700,100,600,600])
+set(gcf,'Color','white')

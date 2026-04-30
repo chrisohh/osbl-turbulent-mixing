@@ -12,9 +12,11 @@ clear; clc;
 %% =========================================================================
 LONG = 'D:\DelawareDataBackup\Longitudinal\PIV\';
 
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\');
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\');
-addpath('D:\Scripps\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\');
+rootpath = 'C:\Users\airsealab\Documents\GitHub';
+% rootpath = 'D:\Scripps';
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
+addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
 ii            = 4;
 num_of_digits = 3;
@@ -106,9 +108,15 @@ for ff = 1:N_frames
     intrp_u_res = intrp_u - ORBX;   % wave-subtracted residual (mean+turb), wave-following, m/s
     intrp_w_res = intrp_w - ORBZ;
 
-    % reverse-transform residual to Cartesian
+    % reverse-transform residual to lab frame
     u_res = reverseTransformVelField_decay_forFab(intrp_u_res, pivRes, SU);
     w_res = reverseTransformVelField_decay_forFab(intrp_w_res, pivRes, SU);
+
+    % reverse-transform mean + orbital fields to lab frame (for video)
+    u_mean_lab = reverseTransformVelField_decay_forFab(intrp_u, pivRes, SU);
+    w_mean_lab = reverseTransformVelField_decay_forFab(intrp_w, pivRes, SU);
+    u_orb_lab  = reverseTransformVelField_decay_forFab(ORBX,    pivRes, SU);
+    w_orb_lab  = reverseTransformVelField_decay_forFab(ORBZ,    pivRes, SU);
 
     % --- build and save decomposedVel to PIVMat_TURB ---
     decomposedVel.compVel.u            = single(u);
@@ -119,10 +127,14 @@ for ff = 1:N_frames
     decomposedVel.compVel.ORBZ         = single(ORBZ);
     decomposedVel.compVel.SU           = single(SU);
     decomposedVel.compVel.pf_surf      = Surface_PIV;
-    decomposedVel.compVel.intrp_u_res = single(intrp_u_res);
-    decomposedVel.compVel.intrp_w_res = single(intrp_w_res);
-    decomposedVel.compVel.u_res       = single(u_res);
-    decomposedVel.compVel.w_res       = single(w_res);
+    decomposedVel.compVel.intrp_u_res  = single(intrp_u_res);
+    decomposedVel.compVel.intrp_w_res  = single(intrp_w_res);
+    decomposedVel.compVel.u_res        = single(u_res);
+    decomposedVel.compVel.w_res        = single(w_res);
+    decomposedVel.compVel.u_mean_lab   = single(u_mean_lab);
+    decomposedVel.compVel.w_mean_lab   = single(w_mean_lab);
+    decomposedVel.compVel.u_orb_lab    = single(u_orb_lab);
+    decomposedVel.compVel.w_orb_lab    = single(w_orb_lab);
 
     save([turb_save exp_name '_compVel_' ps '.mat'], 'decomposedVel', 'pivRes');
 
