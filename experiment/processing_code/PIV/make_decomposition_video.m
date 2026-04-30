@@ -11,7 +11,7 @@ clear; clc;
 %% =========================================================================
 LONG     = 'D:\DelawareDataBackup\Longitudinal\PIV\';
 ii       = 4;            % experiment index
-fps      = 30;
+fps      = 7.2;
 DX       = 1/17697.69;   % m/pixel
 DT       = 10e-3;        % s/frame
 
@@ -28,7 +28,7 @@ nums  = cellfun(@(s) sscanf(s, [exp_name '_compVel_%d.mat']), {files.name});
 N     = length(files);
 fprintf('Experiment: %s   Frames: %d\n', exp_name, N);
 
-out_name = sprintf('decomposition_%s.mp4', exp_name);
+out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s.mp4', exp_name));
 vw = VideoWriter(out_name, 'MPEG-4');
 vw.FrameRate = fps;
 open(vw);
@@ -73,3 +73,4 @@ for ff = 1:N
 end
 close(vw);
 fprintf('Wrote %s (%d frames)\n', out_name, N);
+
