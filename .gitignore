@@ -5,3 +5,5 @@ experiment/processing_code/Wave_Gauge/vaisala_wind_10cmFresh_49cmSalt.mat
 *.png
 *.tif
 experiment/processing_code/SOARS/wind_speed_profile.csv
+*.dat
+*.asv
