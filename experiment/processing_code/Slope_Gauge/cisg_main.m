@@ -267,10 +267,12 @@ m = matfile(mat_fileName);
 [img_height, img_width, nFrames] = size(m, 'Sx');
 fprintf('Data dimensions: %d x %d x %d frames\n', img_height, img_width, nFrames);
 
-
+nx = img_width;
+ny = img_height;
+x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
+y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
 
 %% Visualize the single frame
-addpath('D:\Strat_local\Experiment\')
 % Load just ONE frame (e.g., frame 500)
 frame_num = 228;
 Sx_single = m.Sx(:, :, frame_num);
