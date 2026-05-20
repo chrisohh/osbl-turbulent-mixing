@@ -61,19 +61,20 @@ for ff = 1:N_frames
     pair_num = str2double(tok{1}{1});
     ps = sprintf(['%0' num2str(num_of_digits) 'd'], pair_num);
 
-    % --- surfaces ---
-    imSurfa = FindSurfaceCapillary( ...
-        [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_a.mat'], findMask=true);
-    imSurfb = FindSurfaceCapillary( ...
-        [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_b.mat'], findMask=true);
-
-    % --- load or compute compVel ---
+    % --- load or compute compVel + surfaces ---
     cf_orig = [piv_save exp_name '_compVel_' ps '.mat'];
-    if exist(cf_orig, 'file')
-        tmp     = load(cf_orig, 'compVel');
+    cache_hit = exist(cf_orig, 'file');
+    if cache_hit
+        tmp     = load(cf_orig, 'compVel', 'imSurfa', 'imSurfb');
         compVel = tmp.compVel;
+        imSurfa = tmp.imSurfa;
+        imSurfb = tmp.imSurfb;
     else
         fprintf('  computing compVel for pair %s...\n', ps);
+        imSurfa = FindSurfaceCapillary( ...
+            [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_a.mat'], findMask=true);
+        imSurfb = FindSurfaceCapillary( ...
+            [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_b.mat'], findMask=true);
         load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_a.mat']); IMa = imgPiv;
         load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_b.mat']); IMb = imgPiv;
         compVel = ComputeVelocities_Quick_NoFilt_Deform_Water( ...
@@ -83,30 +84,38 @@ for ff = 1:N_frames
 
     Surface_PIV = imSurfa.surfacePIVImg;
 
-    % --- Cartesian velocity: outlier removal + smoothing ---
-    dx = smoothn(removeOutliers(compVel.delta_x .* compVel.Mask, compVel.dcor), 0.4, 'robust');
-    dz = smoothn(removeOutliers(compVel.delta_z .* compVel.Mask, compVel.dcor), 0.4, 'robust');
-    u = dx .* compVel.Mask .* DX/DT;   % m/s
-    w = dz .* compVel.Mask .* DX/DT;
+    % --- Cartesian velocity: reuse cached u,w if present, else compute ---
+    if isfield(compVel, 'u') && isfield(compVel, 'w')
+        u = compVel.u; w = compVel.w;
+    else
+        dx = smoothn(removeOutliers(compVel.delta_x .* compVel.Mask, compVel.dcor), 0.4, 'robust');
+        dz = smoothn(removeOutliers(compVel.delta_z .* compVel.Mask, compVel.dcor), 0.4, 'robust');
+        u = dx .* compVel.Mask .* DX/DT;   % m/s
+        w = dz .* compVel.Mask .* DX/DT;
+        compVel.u = u; compVel.w = w;
+    end
 
-    compVel.u = u; compVel.w = w;
-    % --- save PIVMat: compVel + imSurfa + imSurfb ---
-    save([piv_save exp_name '_compVel_' ps '.mat'], 'compVel', 'imSurfa', 'imSurfb');
+    % --- save PIVMat only if newly computed ---
+    if ~cache_hit
+        save([piv_save exp_name '_compVel_' ps '.mat'], 'compVel', 'imSurfa', 'imSurfb');
+    end
 
     % --- wave-following transform ---
     pivRes.zPIV = compVel.zPIV; pivRes.xPIV = compVel.xPIV;
     pivRes.GS   = compVel.GS;   pivRes.mask  = compVel.Mask;
     transfo     = generateTransfo_LC_noLFV_2023(compVel, Surface_PIV, pivRes);
     SU          = transfo.SU(2:end,:)   + SU_OFFSET;
-    ORBX        = transfo.ORBX(2:end,:) .* DX/DT;   % pixels/frame → m/s
-    ORBZ        = transfo.ORBZ(2:end,:) .* DX/DT;
+    ORBX        = transfo.ORBX(2:end,:);    % pixels/frame
+    ORBZ        = transfo.ORBZ(2:end,:);
+    ORBX_ms     = ORBX * DX/DT;             % m/s
+    ORBZ_ms     = ORBZ * DX/DT;
     pivRes.pf_surf = SU(1,:);
 
     intrp_u = transformVelField_decay_forFab(u, pivRes, SU);   % m/s, wave-following
     intrp_w = transformVelField_decay_forFab(w, pivRes, SU);
 
-    intrp_u_res = intrp_u - ORBX;   % wave-subtracted residual (mean+turb), wave-following, m/s
-    intrp_w_res = intrp_w - ORBZ;
+    intrp_u_res = intrp_u - ORBX_ms;   % wave-subtracted residual (mean+turb), wave-following, m/s
+    intrp_w_res = intrp_w - ORBZ_ms;
 
     % reverse-transform residual to lab frame
     u_res = reverseTransformVelField_decay_forFab(intrp_u_res, pivRes, SU);
@@ -115,8 +124,8 @@ for ff = 1:N_frames
     % reverse-transform mean + orbital fields to lab frame (for video)
     u_mean_lab = reverseTransformVelField_decay_forFab(intrp_u, pivRes, SU);
     w_mean_lab = reverseTransformVelField_decay_forFab(intrp_w, pivRes, SU);
-    u_orb_lab  = reverseTransformVelField_decay_forFab(ORBX,    pivRes, SU);
-    w_orb_lab  = reverseTransformVelField_decay_forFab(ORBZ,    pivRes, SU);
+    u_orb_lab  = reverseTransformVelField_decay_forFab(ORBX_ms, pivRes, SU);
+    w_orb_lab  = reverseTransformVelField_decay_forFab(ORBZ_ms, pivRes, SU);
 
     % --- build and save decomposedVel to PIVMat_TURB ---
     decomposedVel.compVel.u            = single(u);
