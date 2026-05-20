@@ -214,7 +214,7 @@ x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
 y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
 
 for i = 1:length(frames_to_show)
-    Sx_frame = double(m.Sx(setup.roi.row_min:setup.roi.row_max, ...
+    Sx_frame = double(Sx(setup.roi.row_min:setup.roi.row_max, ...
                            setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
@@ -226,7 +226,7 @@ for i = 1:length(frames_to_show)
 end
 
 for i = 1:length(frames_to_show)
-    Sy_frame = double(m.Sy(setup.roi.row_min:setup.roi.row_max, ...
+    Sy_frame = double(Sy(setup.roi.row_min:setup.roi.row_max, ...
                            setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
