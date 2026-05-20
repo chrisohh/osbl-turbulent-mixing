@@ -13,8 +13,8 @@ clear; clc;
 %% =========================================================================
 LONG = 'D:\DelawareDataBackup\Longitudinal\PIV\';
 
-rootpath = 'C:\Users\airsealab\Documents\GitHub';
-% rootpath = 'D:\Scripps';
+% rootpath = 'C:\Users\airsealab\Documents\GitHub';
+rootpath = 'D:\Scripps';
 
 % Add paths to Fabrice's functions
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
