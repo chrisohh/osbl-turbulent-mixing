@@ -41,15 +41,10 @@ util/
   save_figure.m, inferno.m   - Helpers
 
 plotting/
-  plot_A1_snapshots_csig.m         plot_A2_spectrograms_csig.m
-  plot_A3_kspectra_csig.m          plot_A4_slope_variance.m
-  plot_A6_directional_B.m          plot_B1_kx_omega_csig.m
-  plot_B3_phase_speed_dev.m        plot_B4_angular_dist.m
-  plot_C1_local_k_map.m            plot_C4_cross_stream_coh.m
-  plot_C5_heterogeneity_idx.m      plot_C6_local_stokes_map.m
-  plot_E3_bandwidth_correction.m
-  plot_kx_t_slopes_csig.m          plot_f_t_slopes_csig.m
-  plot_kx_omega_Sx_csig.m
+  plot_A1_snapshots_csig.m     - eta snapshots at chosen times
+  plot_kx_t_slopes_csig.m      - k_x vs t intensity of Sx, Sy
+  plot_f_t_slopes_csig.m       - frequency vs t intensity of Sx, Sy
+  plot_kx_omega_Sx_csig.m      - k_x-omega spectrum of Sx
 ```
 
 ### cisg_main.m — build the per-frame slope cache
@@ -128,9 +123,14 @@ cache_dir    = fullfile(cache_root, sprintf('CISG_slopes_CoreView_%d', coreview_
    1:50`) from `Sx`, `Sy` to remove time-invariant artifacts.
 7. Reconstruct `eta = cisg_reconstruct_eta(Sx, Sy, dx, dy)`.
 8. Pack into `data = struct('Sx', 'Sy', 'eta', 'time', 'setup', 'dx',
-   'dy')` and call the `plotting/plot_*_csig.m` functions. The A1
-   snapshot panel is driven by `target_times` (seconds); other plots
-   take `data` and optional index sets.
+   'dy')` and call the active plotting functions:
+   - `plot_A1_snapshots_csig(data, idx_set)` — eta snapshots at
+     `target_times` (seconds), mapped to indices via `time_subset`.
+   - `plot_kx_t_slopes_csig(data)` — `k_x` vs `t` intensity of `Sx`,
+     `Sy` (per-row FFT in x, averaged over y).
+   - `plot_f_t_slopes_csig(data)` — frequency vs `t` intensity of
+     `Sx`, `Sy`.
+   - `plot_kx_omega_Sx_csig(data)` — `k_x`-`omega` spectrum of `Sx`.
 
 **Output:** figures (PDF/PNG via `util/save_figure.m`) into a local
 `figures/` folder.
