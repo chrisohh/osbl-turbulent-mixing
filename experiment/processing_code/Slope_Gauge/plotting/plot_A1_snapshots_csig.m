@@ -1,50 +1,79 @@
-function plot_A1_snapshots_csig(data)
-% A.1  Five eta(x,y,t_*) snapshots at evenly spaced times.
+function plot_A1_snapshots_csig(data, frame_indices)
+% A.1  eta(x,y,t_*) snapshots.
+% Optional frame_indices: vector of TIME INDICES into data.eta (not raw frame
+% numbers). Defaults to 5 evenly spaced indices.
 %%
 eta   = data.eta;
+Sx = data.Sx;Sy = data.Sy;
 time  = data.time;
 setup = data.setup;
 dx    = data.dx;  dy = data.dy;
 
 [Ny, Nx, Nt] = size(eta);
-roi = setup.roi;
 x_cm = ((1:Nx) - Nx/2) * dx * 100;
 y_cm = ((1:Ny) - Ny/2) * dy * 100;
 
-idx = round(linspace(1, Nt, 5));
+if nargin < 2 || isempty(frame_indices)
+    idx = round(linspace(1, Nt, 5));
+else
+    idx = frame_indices(:).';
+end
+n_plots = numel(idx);
 
-% Common color scale: 99th percentile across all 5 frames (in ROI).
+% Common color scale: 99th percentile across selected frames (in ROI).
 abs_pool = [];
-for k = 1:5
-    f = abs(double(eta(roi.row_min:roi.row_max, roi.col_min:roi.col_max, idx(k))));
+for k = 1:n_plots
+    f = abs(double(eta(:,:, idx(k))));
     abs_pool = [abs_pool; f(:)]; %#ok<AGROW>
 end
 clim = quantile(abs_pool, 0.99);
 if clim == 0, clim = max(abs_pool) + eps; end
 
 fig = figure('Name','A1 eta snapshots (CSIG)','Position',[100 100 1800 380],'Color','w');
-tiledlayout(1, 5, 'TileSpacing','compact','Padding','compact');
-for k = 1:5
+tiledlayout(1, n_plots, 'TileSpacing','compact','Padding','compact');
+for k = 1:n_plots
     nexttile;
-    f = double(eta(:,:,idx(k))) * 1000;            % mm
+    f = double(eta(:,:,idx(k))) * 100;            % cm
     imagesc(x_cm, y_cm, f);
     axis equal tight;
     set(gca,'YDir','normal');
-    caxis([-clim*1000, clim*1000]);
-    colormap(gca, bwr_cmap());
-    title(sprintf('t = %.2f s', time(idx(k))));
-    xlabel('x (cm)'); ylabel('y (cm)');
+    caxis([-clim*100, clim*100]);
+    colormap(gca, brewermap([], 'Spectral'));
+    title(sprintf('$t = %.2f$ s', time(idx(k))), 'Interpreter', 'latex');
+  xlabel('$x$ (cm)', 'interpreter', 'latex');
+ylabel('$y$ (cm)', 'interpreter', 'latex');
+    set(gca, 'fontsize', 14, 'fontname', 'times');
 end
-cb = colorbar; cb.Label.String = '\eta (mm)';
-sgtitle('A.1  CSIG surface elevation snapshots');
+cb1 = colorbar; cb1.Label.String = '$\eta$ (cm)';cb1.Label.Interpreter = 'latex'; cb1.Label.FontSize = 16;
+
+fig = figure('Name','Sx Sy snapshots (CSIG)','Position',[100 100 1800 800],'Color','w');
+tiledlayout(2, n_plots, 'TileSpacing','compact','Padding','compact');
+for k = 1:n_plots
+    nexttile;
+    f = double(Sx(:,:,idx(k)));          
+    imagesc(x_cm, y_cm, f);
+    axis equal tight;
+    set(gca,'YDir','normal');
+    caxis([-0.4, 0.4]);
+    colormap(gca, brewermap([], 'Spectral'));
+    title(sprintf('$t = %.2f$ s', time(idx(k))), 'Interpreter', 'latex');
+  xlabel('$x$ (cm)', 'interpreter', 'latex');
+ylabel('$y$ (cm)', 'interpreter', 'latex');
+    set(gca, 'fontsize', 14, 'fontname', 'times');
+end
+cb2 = colorbar; cb2.Label.String = '$S_x$'; cb2.Label.Interpreter = 'latex'; cb2.Label.FontSize = 16;
+for k = 1:n_plots
+    nexttile;
+    f = double(Sy(:,:,idx(k)));     
+    imagesc(x_cm, y_cm, f);
+    axis equal tight;
+    set(gca,'YDir','normal');
+    caxis([-0.2, 0.2]);
+    colormap(gca, brewermap([], 'Spectral'));
+xlabel('$x$ (cm)', 'interpreter', 'latex');
+ylabel('$y$ (cm)', 'interpreter', 'latex');
+    set(gca, 'fontsize', 14, 'fontname', 'times');
+end
+cb3 = colorbar; cb3.Label.String = '$S_y$'; cb3.Label.Interpreter = 'latex'; cb3.Label.FontSize = 16;
 % save_figure(fig, 'A1_snapshots_csig');
-end
-
-
-function cmap = bwr_cmap()
-n = 256; h = floor(n/2);
-r = [linspace(0,1,h), ones(1,n-h)];
-g = [linspace(0,1,h), linspace(1,0,n-h)];
-b = [ones(1,h),       linspace(1,0,n-h)];
-cmap = [r' g' b'];
 end

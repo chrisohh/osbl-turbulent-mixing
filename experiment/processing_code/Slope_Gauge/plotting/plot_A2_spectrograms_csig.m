@@ -59,7 +59,7 @@ ylabel('\omega/2\pi (Hz)'); xlabel('t (s)');
 title('|\eta(\omega,t)|^2 (spatial mean) — dotted: \omega_p(t)');
 
 sgtitle('A.2  Frequency spectrograms');
-save_figure(fig, 'A2_spectrograms_csig');
+% save_figure(fig, 'A2_spectrograms_csig');
 end
 
 
