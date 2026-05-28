@@ -224,21 +224,21 @@ plot_f_t_slopes_csig(data);
 %%
 plot_kx_omega_Sx_csig(data);
 %%
-plot_A2_spectrograms_csig(data);
-%%
-plot_A3_kspectra_csig(data);
-%%
-plot_A4_slope_variance(data);
-%%
-plot_A6_directional_B(data);
-plot_B1_kx_omega_csig(data);
-
-plot_B3_phase_speed_dev(data);
-plot_B4_angular_dist(data);
-plot_C1_local_k_map(data);
-plot_C4_cross_stream_coh(data);
-plot_C5_heterogeneity_idx(data);
-plot_C6_local_stokes_map(data);
-plot_E3_bandwidth_correction(data);
-
-fprintf('\nAll CSIG plots written to figures/\n');
+% plot_A2_spectrograms_csig(data);
+% %%
+% plot_A3_kspectra_csig(data);
+% %%
+% plot_A4_slope_variance(data);
+% %%
+% plot_A6_directional_B(data);
+% plot_B1_kx_omega_csig(data);
+% 
+% plot_B3_phase_speed_dev(data);
+% plot_B4_angular_dist(data);
+% plot_C1_local_k_map(data);
+% plot_C4_cross_stream_coh(data);
+% plot_C5_heterogeneity_idx(data);
+% plot_C6_local_stokes_map(data);
+% plot_E3_bandwidth_correction(data);
+% 
+% fprintf('\nAll CSIG plots written to figures/\n');
