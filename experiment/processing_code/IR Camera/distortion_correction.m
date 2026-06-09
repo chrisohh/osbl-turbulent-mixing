@@ -6,7 +6,7 @@
 addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release');
 % addpath('C:\Users\airsealab\AppData\Local\Programs\FLIR Systems\sdks\file\bin\Release')
 % Create a FlirMovieReader object
-v = FlirMovieReader('D:\HLAB_2026\IR_camera\Rec-000014.ats');
+v = FlirMovieReader('D:\HLAB_2026\IR_camera\Rec-000017.ats');
 v.unit='temperatureFactory';
 %% Extract key metadata
 % Camera and acquisition info
@@ -27,7 +27,8 @@ width = cameraInfo.width;
 data = zeros(height, width, numFrames, 'single');
 
 %% Read one frame
-sampleFrame=readFrame(v, 8514);
+frameToPlot=1268;
+sampleFrame=readFrame(v, frameToPlot);
 figure;
 imagesc(sampleFrame)
 colorbar;
@@ -61,20 +62,6 @@ while ~isDone(v) && actualFrameNum <= endFrameIdx
     frameIdx = frameIdx + 1;
     actualFrameNum = actualFrameNum + 1;
 end
-
-%% Plot a sample frame
-frameToPlot = 1166; % or round(numFrames/2) for middle frame
-
-% figure('Position', [100 100 1200 500]);
-
-imagesc(data(:,:,frameToPlot));
-axis image;
-colorbar;
-colormap(hot);
-% caxis([radiometry.minTemp radiometry.maxTemp]); % or use percentiles
-title(sprintf('t= %.2f s', frameToPlot/50));
-xlabel('X (pixels)');
-ylabel('Y (pixels)');
 
 %%
 % % Initialize parameters
@@ -113,14 +100,14 @@ end
 img_avg = img_sum / 10;
 
 %%
-f1=data(:,:,1166);
-mask = f1 < 17.8;
+wallTemp = 18.5;%17.3;  % or whatever temp the walls are at
+maskThresh = wallTemp+0.5;
+f1=data(:,:,frameToPlot);
+mask = f1 < maskThresh;%17.8;
 
-%%
-Frame=data(:,:,1166);
+Frame=data(:,:,frameToPlot);
 masked_data=(Frame-img_avg).*mask;
 masked_data(~mask) = NaN;  % Set false regions to NaN
-%%
 
 figure;
 imagesc(masked_data);
@@ -130,7 +117,7 @@ xlabel('')
 
 %%
 % Threshold to find walls (adjust based on your image)
-wallTemp = 17.3;  % or whatever temp the walls are at
+
 tolerance = 0.1;  % degrees
 
 wallMask = abs(Frame - wallTemp) < tolerance;
@@ -179,7 +166,7 @@ x_right = rightWall_x(validRight);
 y_right = rightWall_y(validRight);
 
 % Plot detected wall points
-subplot(2,3,3);
+figure;
 imagesc(Frame);
 colormap(hot);
 colorbar;
@@ -226,7 +213,7 @@ x_left_fit = polyval(p_left, y_eval);
 x_right_fit = polyval(p_right, y_eval);
 
 % Plot fitted curves
-subplot(2,3,4);
+figure;
 imagesc(Frame);
 colormap(hot);
 colorbar;
@@ -385,17 +372,39 @@ ylabel('Along-wind (cm)');
 % clim([-0.2,0.2])
 
 %% Final image
+% Instantaneous spatial-mean ΔT (water pixels only)
+    Temp_field=frameData_corrected';
+    dT = Temp_field - mean(Temp_field(round(width*0.25):round(width*0.75),round(row*0.25):round(row*0.75)), 'all','omitnan');
+
+    %%
+x=(y_regular-y_regular(1));
+y=x_regular;
 figure;
-imagesc(y_regular*100, x_regular*100, frameData_corrected'+16.7);
+imagesc(x*100,y*100, dT);%frameData_corrected'+16.7
 colormap(hot);
 c=colorbar;
 axis equal tight;
-title(sprintf('$t=%.2f$ s',1166/cameraInfo.frameRate),'interpreter','latex');
+title(sprintf('$t=%.2f$ s',frameToPlot/cameraInfo.frameRate),'interpreter','latex');
 xlabel('Along-wind (cm)')
 ylabel('Cross-wind (cm)');
-c.Label.String='Temp (^oC)';
-set(gca,'fontsize',16)
-clim([16,16.7])
+c.Label.String=' \DeltaT (^oC)';
+set(gca,'fontsize',16,'fontname','times')
+clim([-0.25,0.25])
+% xlim([0,40])
+ylim([-20,20])
+set(gcf,'color','white')
+%%
+print('D:\HLAB_2026\IR_camera\Processed\IR_Rec-000026.png','-dpng','-r600')
+
+%% Save processing parameters (small file — reapply to .ats to get any frame)
+frameRate = cameraInfo.frameRate;
+maskThresh = 17.8;
+save_path = 'D:\HLAB_2026\IR_camera\Processed\IR_Rec-000026_params.mat';
+save(save_path, 'physicalX', 'physicalY', 'X_regular', 'Y_regular', ...
+     'x', 'y', 'mask', 'wallTemp', 'img_avg', 'p_left', 'p_right', ...
+     'frameToPlot', 'frameRate', 'dT');
+fprintf('Saved processing parameters to %s\n', save_path);
+
 %% Do it for the rest of the frames
 %% Process and save all corrected frames using matfile
 corrected_fileName = 'Y:\HLAB_2026\IR_camera\Processed\distortion_corrected_Rec-000014.mat';
