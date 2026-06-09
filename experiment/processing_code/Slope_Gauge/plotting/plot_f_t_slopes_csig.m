@@ -1,10 +1,15 @@
-function plot_f_t_slopes_csig(data, frame_indices)
+function plot_f_t_slopes_csig(data, frame_indices, win_dur)
 % PLOT_F_T_SLOPES_CSIG  Frequency-vs-time spectrogram of Sx and Sy.
 %
 % Same row-averaged spatial FFT as plot_kx_t_slopes_csig, then the
 % one-sided kx axis is mapped to frequency via the linear gravity-capillary
 % dispersion relation  omega = sqrt(g*kx + gamma*kx^3),  f = omega/(2*pi).
 % The result is interpolated onto a uniform frequency grid for display.
+%
+% win_dur (optional, seconds): average spatial spectra over a temporal
+%   window of this duration centred at each index in frame_indices.
+%   Default 0 = single-frame (old behaviour).  E.g. win_dur=4 replicates
+%   the Leckler et al. 4-second windowed approach.
 %
 % Also produces:
 %   - peak-frequency ridge overlaid on the spectrogram
@@ -25,17 +30,35 @@ else
 end
 n_t = numel(idx);
 
+if nargin < 3 || isempty(win_dur) || win_dur <= 0
+    win_dur = 0;
+end
+
 % One-sided kx axis (rad/m); kx(1)=0 is DC, skip when converting to f
 Nk    = floor(Nx/2) + 1;
 kx    = 2*pi * (0:Nk-1) / (Nx*dx);
 win_x = hann(Nx).';
 
-% Compute kx-t power spectra (Nk x n_t)
+% Compute kx-t power spectra (Nk x n_t), optionally time-averaged
 Sx_kt = zeros(Nk, n_t);
 Sy_kt = zeros(Nk, n_t);
 for j = 1:n_t
-    [Sx_kt(:,j), Sy_kt(:,j)] = row_avg_spectrum( ...
-        double(Sx(:,:,idx(j))), double(Sy(:,:,idx(j))), win_x, Nk);
+    if win_dur > 0
+        t_c    = time(idx(j));
+        in_win = find(abs(time - t_c) <= win_dur/2);
+    else
+        in_win = idx(j);
+    end
+    acc_x = zeros(Nk, 1);
+    acc_y = zeros(Nk, 1);
+    for k = in_win(:).'
+        [px, py] = row_avg_spectrum( ...
+            double(Sx(:,:,k)), double(Sy(:,:,k)), win_x, Nk);
+        acc_x = acc_x + px;
+        acc_y = acc_y + py;
+    end
+    Sx_kt(:,j) = acc_x / numel(in_win);
+    Sy_kt(:,j) = acc_y / numel(in_win);
 end
 
 t_plot = time(idx);
@@ -121,31 +144,33 @@ title('Spectral peak power vs time',            'Interpreter', 'latex');
 legend('$S_x$', '$S_y$',                       'Interpreter', 'latex', 'Location', 'best');
 set(gca, 'fontsize', 14, 'fontname', 'times');
 
-%% Sanity-check: per-row spectra in frequency domain at first snapshot
-j_check = 1;
-[~, ~, Px_rows, Py_rows] = row_avg_spectrum( ...
-    double(Sx(:,:,idx(j_check))), double(Sy(:,:,idx(j_check))), win_x, Nk);
-
-Px_rows_f = interp1(f_kx(:), Px_rows(:, 2:end).', f_uni(:), 'linear', 0);
-Py_rows_f = interp1(f_kx(:), Py_rows(:, 2:end).', f_uni(:), 'linear', 0);
-
-n_show = min(8, Ny);
-y_show = round(linspace(1, Ny, n_show));
-
-fig3 = figure('Name', 'f-domain per-row sanity check', ...
+%% Per-time spectra figure
+fig3 = figure('Name', 'f spectra at each time', ...
               'Position', [100 100 1200 500], 'Color', 'w');
-subplot(1,2,1);
-loglog(f_uni(2:end), Px_rows_f(2:end, y_show), 'Color', [.6 .6 .6]); hold on;
-loglog(f_uni(2:end), mean(Px_rows_f(2:end,:), 2), 'k', 'LineWidth', 2);
-xlabel('f (Hz)'); ylabel('|S_x(f)|^2');
-title(sprintf('S_x per-row (grey) vs y-average (black) at t = %.2f s', t_plot(j_check)));
+
+colors  = lines(n_t);
+leg_str = arrayfun(@(t) sprintf('t = %.0f s', t), t_plot, 'UniformOutput', false);
+
+subplot(1,2,1); hold on;
+for j = 1:n_t
+    loglog(f_uni(2:end), Sx_ft(2:end, j), 'Color', colors(j,:), 'LineWidth', 1.2);
+end
+xlabel('$f$ (Hz)', 'Interpreter', 'latex');
+ylabel('$|S_x(f)|^2$', 'Interpreter', 'latex');
+title('$S_x$ spectra ($y$-averaged)', 'Interpreter', 'latex');
+legend(leg_str, 'Interpreter', 'latex', 'Location', 'best', 'FontSize', 9);
+set(gca, 'fontsize', 12, 'fontname', 'times');
 grid on;
 
-subplot(1,2,2);
-loglog(f_uni(2:end), Py_rows_f(2:end, y_show), 'Color', [.6 .6 .6]); hold on;
-loglog(f_uni(2:end), mean(Py_rows_f(2:end,:), 2), 'k', 'LineWidth', 2);
-xlabel('f (Hz)'); ylabel('|S_y(f)|^2');
-title(sprintf('S_y per-row (grey) vs y-average (black) at t = %.2f s', t_plot(j_check)));
+subplot(1,2,2); hold on;
+for j = 1:n_t
+    loglog(f_uni(2:end), Sy_ft(2:end, j), 'Color', colors(j,:), 'LineWidth', 1.2);
+end
+xlabel('$f$ (Hz)', 'Interpreter', 'latex');
+ylabel('$|S_y(f)|^2$', 'Interpreter', 'latex');
+title('$S_y$ spectra ($y$-averaged)', 'Interpreter', 'latex');
+legend(leg_str, 'Interpreter', 'latex', 'Location', 'best', 'FontSize', 9);
+set(gca, 'fontsize', 12, 'fontname', 'times');
 grid on;
 end
 

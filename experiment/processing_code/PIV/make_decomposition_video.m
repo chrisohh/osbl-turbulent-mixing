@@ -28,7 +28,7 @@ nums  = cellfun(@(s) sscanf(s, [exp_name '_compVel_%d.mat']), {files.name});
 N     = length(files);
 fprintf('Experiment: %s   Frames: %d\n', exp_name, N);
 
-out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s.mp4', exp_name));
+out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s_rectIntrWndw.mp4', exp_name));
 vw = VideoWriter(out_name, 'MPEG-4');
 vw.FrameRate = fps;
 open(vw);
@@ -37,6 +37,8 @@ open(vw);
 %% LOOP
 %% =========================================================================
 fig = figure('Position',[700,100,800,800],'Color','white');
+
+set(gcf, 'DefaultAxesColor', [0.9 0.9 0.9])  % all subplots get gray NaN
 
 for ff = 1:N
     S      = load([turb_save files(ff).name], 'decomposedVel', 'pivRes');
@@ -48,22 +50,23 @@ for ff = 1:N
 
     clf(fig);
     panels = { ...
-       cv.u_raw_lab,  'u_{raw} (m/s)',            [-0.01, 0.12]; ...
-       cv.w_raw_lab,  'w_{raw} (m/s)',            [-0.04, 0.04]; ...
+       cv.u_raw,  'u_{raw} (m/s)',            [-0.01, 0.12]; ...
+       cv.w_raw,  'w_{raw} (m/s)',            [-0.04, 0.04]; ...
        cv.u_orb_lab,  'u_{orb} (m/s)',            [-0.04, 0.04]; ...
        cv.w_orb_lab,  'w_{orb} (m/s)',            [-0.04, 0.04]; ...
        cv.u_res_lab,  'u_{raw}-u_{orb} (m/s)',    [-0.01, 0.12]; ...
        cv.w_res_lab,  'w_{raw}-w_{orb} (m/s)',    [-0.04, 0.04]};
     for k = 1:6
         subplot(3,2,k);
-        imagesc(x, z, panels{k,1});
+        h=imagesc(x, z, panels{k,1});
+        set(h, 'AlphaData', ~isnan(panels{k,1}))
         colorbar; colormap(gca, brewermap([],'Spectral'));
         xlabel('x (m)'); ylabel('z (m)');
         title(panels{k,2});
         axis equal; axis tight;
         clim(panels{k,3});
     end
-    sgtitle(sprintf('%s  frame %d/%d', exp_name, ff, N), 'Interpreter','none');
+    sgtitle(sprintf('%s  frame %d/%d', exp_name, ff-1, N-1), 'Interpreter','none');
     drawnow;
     writeVideo(vw, getframe(fig));
 

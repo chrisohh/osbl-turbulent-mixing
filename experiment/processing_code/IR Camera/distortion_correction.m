@@ -1,8 +1,12 @@
 
 %% Directly read from ats
-addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release')
+% addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release')
+
+% Add the clean Program Files path
+addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release');
+% addpath('C:\Users\airsealab\AppData\Local\Programs\FLIR Systems\sdks\file\bin\Release')
 % Create a FlirMovieReader object
-v = FlirMovieReader('\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000014.ats');
+v = FlirMovieReader('D:\HLAB_2026\IR_camera\Rec-000014.ats');
 v.unit='temperatureFactory';
 %% Extract key metadata
 % Camera and acquisition info

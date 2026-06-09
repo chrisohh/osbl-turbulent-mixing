@@ -15,7 +15,7 @@ dt = 1/fs;  % 0.02 seconds between frames
 
 % Physical setup (ADJUST THESE TO YOUR ACTUAL MEASUREMENTS)
 setup = struct();
-setup.camera_height = 41.7;            % cm above water surface (MEASURE THIS)
+% setup.camera_height = 41.7;            % cm above water surface (not used in this code)
 setup.water_depth = 49;              % cm from water surface to pattern (MEASURE THIS)
 % setup.pattern_width_cm = 20*2.54;    % 50.8 cm (your printed pattern)
 % setup.pattern_height_cm = 20*2.54;   % 50.8 cm
@@ -99,8 +99,8 @@ save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
      'coreview_num', 'img_height', 'img_width');
 fprintf('Wrote metadata: %s\n', fullfile(out_dir, 'metadata.mat'));
 %%
-start_frame = 1111;
-end_frame = totalFrames;
+start_frame = 1101;
+end_frame = 1101;%totalFrames;
 frames_to_process = start_frame:10:end_frame;
 nFrames = length(frames_to_process);
 

@@ -30,9 +30,14 @@ fprintf('Outer ROI baked in cache: rows [%d %d] cols [%d %d]\n', ...
 % The saved CISG_ROI file holds an inner ROI in ORIGINAL full-image coords.
 % Cached frames are already cropped to the outer ROI, so translate by the
 % outer-ROI offset and clamp to the cached-frame bounds.
+
 outer_roi = setup.roi;   % outer ROI from cache metadata (full-image coords)
 roi_file  = '\\Airseaserver28\D\HLAB_2026\SlopeGauge\Processed\CISG_ROI_CoreView_22.mat';
 saved     = load(roi_file, 'roi');
+
+frame_to_show = 1;     % raw frame number; must exist in the cache
+[Sx_one, Sy_one] = load_slope_frame(cache_dir, frame_to_show);
+[cached_ny, cached_nx]  = size(Sx_one);
 
 inner_roi = struct( ...
     'row_min', max(1,         saved.roi.row_min - outer_roi.row_min + 1), ...
@@ -60,7 +65,7 @@ setup.valid_mask(inner_roi.row_min:inner_roi.row_max, ...
                  inner_roi.col_min:inner_roi.col_max) = true;
 
 %% Load one cached frame for inner-ROI preview
-frame_to_show = 2281;     % raw frame number; must exist in the cache
+frame_to_show = 1101;     % raw frame number; must exist in the cache
 [Sx_one, Sy_one] = load_slope_frame(cache_dir, frame_to_show);
 [cached_ny, cached_nx]  = size(Sx_one);
 
@@ -162,7 +167,10 @@ set(gcf, 'Color', 'white');
 %% Materialize the inner-ROI cube and run the plot suite
 % load_slope_cube crops to inner_roi as it loads, so allocations are
 % (inner_ny * inner_nx * Nt * 4 bytes) * 3 arrays (Sx, Sy, eta).
-frame_subset = 1111:10:length(time);     % e.g. frames_to_process(1:500) for a quick test
+target_time_subset = [22.2, 37];
+[~,idx1] = min(abs(target_time_subset(1) - time));
+[~,idx2] = min(abs(target_time_subset(2) - time));
+frame_subset = idx1:idx2;     % all frames in range; spectrogram plots use win_dur=4 s averaging
 fprintf('Loading slope cube (%d frames, inner-ROI cropped) ...\n', numel(frame_subset));
 [Sx, Sy] = load_slope_cube(cache_dir, frame_subset, inner_roi);
 time_subset = (frame_subset - 1) * dt;
@@ -170,18 +178,23 @@ time_subset = (frame_subset - 1) * dt;
 %% Rest-period per-pixel offset subtraction
 % Removes time-invariant artifacts (ref-cal error, stuck spots present at rest).
 % rest_frames must be cached and use the same outer ROI (same cached layout).
+slope_offset_file = strcat([cache_dir '\slope_offset.mat']);
+if exist(slope_offset_file, 'file')
+    load(slope_offset_file)
+else
 rest_frames = 1:50;
 fprintf('Loading rest cube (%d frames) for per-pixel offset ...\n', numel(rest_frames));
 [Sx_rest, Sy_rest] = load_slope_cube(cache_dir, rest_frames, inner_roi);
 Sx_offset = mean(Sx_rest, 3);
 Sy_offset = mean(Sy_rest, 3);
-clear Sx_rest Sy_rest;
+save(strcat([cache_dir,'\slope_offset.mat']),'Sx_offset','Sy_offset','Sx_rest','Sy_rest')
+end
 fprintf('Subtracting per-pixel rest offsets.\n');
 Sx = Sx - Sx_offset;
 Sy = Sy - Sy_offset;
 
-fprintf('Reconstructing eta cube ...\n');
-eta = cisg_reconstruct_eta(Sx, Sy, dx, dy);
+% fprintf('Reconstructing eta cube ...\n');
+% eta = cisg_reconstruct_eta(Sx, Sy, dx, dy);
 
 if ~exist('figures', 'dir'), mkdir figures; end
 
@@ -192,7 +205,7 @@ setup.roi        = struct('row_min', 1, 'row_max', inner_ny, ...
                           'col_min', 1, 'col_max', inner_nx);
 setup.valid_mask = true(inner_ny, inner_nx);
 
-data = struct('Sx', Sx, 'Sy', Sy, 'eta', eta, 'time', time_subset, ...
+data = struct('Sx', Sx, 'Sy', Sy, 'time', time_subset, ...
               'setup', setup, 'dx', dx, 'dy', dy);
 
 %% Compute (ak)^2 time series
@@ -216,13 +229,21 @@ plot_A1_snapshots_csig(data, idx_set);
 % plot_A1_snapshots_csig(data, [1 25 60 100]);             % raw index version
 
 %%
-% k_x-vs-t intensity of S_x, S_y (per-row FFT in x, averaged over y).
-% Omit 2nd arg to use all snapshots, or pass idx_set for the chosen times.
-plot_kx_t_slopes_csig(data);
+% kx-vs-t and f-vs-t spectrograms.
+% 3rd arg win_dur (s): average spectra over a time window centered on each snapshot.
+% E.g. win_dur=4 gives 4-second blocks (200 frames at 50 Hz, df=0.25 Hz).
+t_centers = time_subset(1):5:time_subset(end);
+[~, fi_centers] = min(abs(time_subset(:) - t_centers(:).'), [], 1);
+plot_kx_t_slopes_csig(data, [], 4, fi_centers);
 %%
-plot_f_t_slopes_csig(data);
+plot_f_t_slopes_csig(data, fi_centers, 4);
 %%
-plot_kx_omega_Sx_csig(data);
+% plot_kx_omega_Sx_csig(data, method, kx_lp)
+% Full-record (kx, f) spectrum — single image, entire time series used
+plot_kx_omega_Sx_csig(data, '2d')        % ky=0 slice (Leckler et al. 2015)
+% plot_kx_omega_Sx_csig(data, '2d', 400)  % same with LP filter at 400 rad/m
+%%
+diagnose_kx_peak(data, cache_dir, 1:50, 200, dt)
 %%
 % plot_A2_spectrograms_csig(data);
 % %%
