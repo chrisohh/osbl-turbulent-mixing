@@ -1,4 +1,4 @@
-function [CompVel] = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt(PIV1, PIV2, Mask1, Mask2, IntrWndw, GrdSpc, keep_best, inter_uod_in)
+function [CompVel] = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt(PIV1, PIV2, Mask1, Mask2, IntrWndw, GrdSpc, keep_best, inter_uod_in, debug_plot)
 % ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt
 %
 %   Water-side PIV with image deformation plus four improvements from the
@@ -54,6 +54,10 @@ function [CompVel] = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt(PIV1, PI
 %            false = set to NaN when gate fails; let validatePIV fill gaps (default)
 if nargin < 7, keep_best = false; end
 
+% debug_plot: true = print per-level residuals + scatter plot at level 1
+%             false (default) = silent
+if nargin < 9, debug_plot = false; end
+
 % inter_uod: optional struct to apply UOD between pyramid passes before deformation
 %   .enabled     false   set true to activate
 %   .remove      2.0     normalised residual threshold for removal
@@ -72,15 +76,14 @@ if nargin >= 8 && isstruct(inter_uod_in)
 end
 
 %% ---- Parse pyramid — support square (Nx1) and rectangular (Nx2) ----
-IntrWndw = IntrWndw(:);   % ensure column if square
-GrdSpc   = GrdSpc(:);
-
 if size(IntrWndw, 2) == 2
     IWx = IntrWndw(:, 1);   % horizontal window sizes per level
     IWz = IntrWndw(:, 2);   % vertical   window sizes per level
     GSx = GrdSpc(:, 1);
     GSz = GrdSpc(:, 2);
 else
+    IntrWndw = IntrWndw(:); % ensure column for square inputs
+    GrdSpc   = GrdSpc(:);
     IWx = IntrWndw;          % square: same in both dimensions
     IWz = IntrWndw;
     GSx = GrdSpc;
@@ -101,6 +104,18 @@ IM1_D = PIV1;
 IM2_D = PIV2;
 
 [h, w]   = size(PIV1);
+[X1, Y1] = meshgrid(1:w, 1:h);
+
+% Lateral mirror-pad: gives full IWs at left/right image edges (Davis-style)
+pad_x = 2 * max(IWx);
+w_orig = w;
+PIV1  = padarray(PIV1,  [0, pad_x], 'symmetric');  % mirror: gives contrast for coarse dcor gate
+PIV2  = padarray(PIV2,  [0, pad_x], 'symmetric');
+Mask1 = padarray(Mask1, [0, pad_x], 'replicate');   % replicate: edge mask validity extends outward
+Mask2 = padarray(Mask2, [0, pad_x], 'replicate');
+IM1_D = PIV1;
+IM2_D = PIV2;
+[h, w] = size(PIV1);
 [X1, Y1] = meshgrid(1:w, 1:h);
 
 %%
@@ -219,10 +234,33 @@ for lvl = 1:nLevels-1
         [delx, dely] = interpass_uod(delx, dely, mk_lvl, inter_uod);
     end
 
-    % [3] Decaying smoothing
+    % [3] Decaying smoothing — suppress mirror-padded columns first so smoothn
+    %     fills them from interior rather than averaging reflected velocities
+    pad_cols = (x < pad_x+1) | (x > pad_x+w_orig);
+    delx(:, pad_cols) = NaN;
+    dely(:, pad_cols) = NaN;
     S_lvl   = 1 / lvl / 10;
     delx_sm = smoothn(delx, S_lvl, 'robust');
     dely_sm = smoothn(dely, S_lvl, 'robust');
+
+    if debug_plot
+        residual_x = delx - pdelx;
+        residual_z = dely - pdely;
+        fprintf('  Level %d (IW %dx%d): |res_x|=%.1f±%.1f px  limit=%.0f | |res_z|=%.1f±%.1f px  limit=%.0f\n', ...
+            lvl, iw_x, iw_z, ...
+            nanmean(abs(residual_x(:))), nanstd(residual_x(:)), iw_x/4, ...
+            nanmean(abs(residual_z(:))), nanstd(residual_z(:)), iw_z/4);
+        if lvl == 1
+            figure('Name','Level 1: smoothed vs raw delx','NumberTitle','off');
+            scatter(delx(:), delx_sm(:), 4, 'filled', 'MarkerFaceAlpha', 0.3);
+            hold on;
+            lims = [nanmin(delx(:)) nanmax(delx(:))];
+            plot(lims, lims, 'r--');
+            xlabel('raw delx (px)'); ylabel('smoothed delx\_sm (px)');
+            title(sprintf('Level 1  S=%.3f  n=%d valid', S_lvl, sum(~isnan(delx(:)))));
+            axis equal; grid on;
+        end
+    end
 
     [X, Y] = meshgrid(x, y);
 
@@ -341,12 +379,25 @@ for c = x
     bxCNTc = bxCNTc + 1;
 end
 
-% [4] dcor-weighted final smoothn (S=0: gap-fill only, no blurring)
+% [4] dcor-weighted final smoothn — suppress mirror-padded columns first
 [X, Y] = meshgrid(x, y);
+pad_cols = (x < pad_x+1) | (x > pad_x+w_orig);
+delx(:, pad_cols) = NaN;
+dely(:, pad_cols) = NaN;
 dcor_w  = dcor;
 dcor_w(isnan(dcor_w)) = 0;
+dcor_w(:, pad_cols) = 0;   % zero weight so smoothn ignores mirror vectors
 delx_sm = smoothn(delx, dcor_w, 0.4, 'robust');
 dely_sm = smoothn(dely, dcor_w, 0.4, 'robust');
+
+if debug_plot
+    residual_x = delx - pdelx;
+    residual_z = dely - pdely;
+    fprintf('  Level %d (IW %dx%d): |res_x|=%.1f±%.1f px  limit=%.0f | |res_z|=%.1f±%.1f px  limit=%.0f\n', ...
+        lvl, iw_x, iw_z, ...
+        nanmean(abs(residual_x(:))), nanstd(residual_x(:)), iw_x/4, ...
+        nanmean(abs(residual_z(:))), nanstd(residual_z(:)), iw_z/4);
+end
 
 U1 = interp2(X, Y, delx_sm, X1, Y1, '*spline');
 V1 = interp2(X, Y, dely_sm, X1, Y1, '*spline');
@@ -355,6 +406,21 @@ V1 = interp2(X, Y, dely_sm, X1, Y1, '*spline');
 %%
 % Output — same fields as _Quick_NoFilt_Deform_Water (drop-in compatible)
 % plus IW_x / IW_z / GS_x / GS_z for rectangular-window callers.
+% Crop grid back to original image coordinates with half-IW margin on each
+% side — matches the unpadded grid boundary so generateTransfo is compatible
+keep  = (x >= pad_x + iw_x/2) & (x <= pad_x + w_orig - iw_x/2);
+x     = x(keep) - pad_x;
+delx  = delx(:, keep);
+dely  = dely(:, keep);
+dcor  = dcor(:, keep);
+MASK  = MASK(:, keep);
+pdelx = pdelx(:, keep);
+pdely = pdely(:, keep);
+keep_img = false(1, w);
+keep_img(pad_x+1 : pad_x+w_orig) = true;
+U1 = U1(:, keep_img);
+V1 = V1(:, keep_img);
+
 CompVel.INTdelx = pdelx;
 CompVel.INTdelz = -pdely;
 CompVel.dcor    = dcor;    % NaN=air; measured or best-prior where water

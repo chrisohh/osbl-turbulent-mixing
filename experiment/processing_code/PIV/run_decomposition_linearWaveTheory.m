@@ -22,7 +22,7 @@ addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
 ii = 4;                     % experiment index
-image_pair_number = 203;    % sanity-check frame
+image_pair_number = 176;    % sanity-check frame
 
 DX = 1/17697.69;           % m per pixel
 DT = 10e-3;                % sec per image pair
@@ -113,26 +113,51 @@ else
 %     GrdSpc   = IntrWndw/2;
 %     compVel = ComputeVelocities_Quick_NoFilt_Deform_Water( ...
 %         IM_a, IM_b, imSurfa.mask, imSurfb.mask, IntrWndw, GrdSpc);
-    %%
+%% PIV
+% Rule of thumb
+% First pass interogation window
+% Maximum displacement should be ≤ ¼ of the window size
+%
+% Grid spacing (overlap) 50% is standard, but I had 75% at the final pass
+% in x direction to have the same vector spacing in x and y for rectangular
+% window
+%Each level should halve the window — coarse level captures the bulk displacement, fine levels resolve residuals
+% Residual displacement at each pass should also satisfy ¼ rule — after deformation removes the bulk, the residual should be < IW/4 at that level
+
 % Each row = one pyramid level: [IW_x, IW_z]
-IntrWndw = [% wide x for large horizontal displacement,
-            256 64;
-            128 32;
-             64 32;    %   shallow z to stay below surface
-             32 16];
+GLINT_BUFFER = 20;   % tune to glint band thickness in pixels
+fprintf('Glint buffer: %d px = %.2f mm\n', GLINT_BUFFER, GLINT_BUFFER * DX * 1e3);
+Mask_a = apply_glint_buffer(imSurfa, GLINT_BUFFER);
+Mask_b = apply_glint_buffer(imSurfb, GLINT_BUFFER);
+
+figure;
+imagesc(IM_a, [0,300]);
+colormap(gca, gray)
+hold on;
+red_overlay = cat(3, ones(size(Mask_a)), zeros(size(Mask_a)), zeros(size(Mask_a)));
+h = imagesc(red_overlay);
+h.AlphaData = 0.3 * isnan(Mask_a);
+axis tight; axis equal
+title(sprintf('PIV %s frame %s - A', exp_name, pair_str), ...
+    'Interpreter', 'none')
+%%
+IntrWndw = [128 128;
+             64 64;    %   shallow z to stay below surface
+             32 32;
+             16 16];
 GrdSpc = [IntrWndw(:,1)/2,   IntrWndw(:,2)/2];   % 50% both, all passes
-GrdSpc(end,1) = IntrWndw(end,1)/4;                % 75% x at final pass only
+% GrdSpc(end,1) = IntrWndw(end,1)/4;                % 75% x at final pass only
 % compVel = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt( ...
 %          IM_a, IM_b, imSurfa.mask, imSurfb.mask, IntrWndw, GrdSpc,1);
-dcorGate=0;
+dcorGate=0;debug_plot=1;
 %allow inter-pass UOD
 iuod.enabled  = true;
 iuod.remove   = 2.0;
 iuod.reinsert = 3.0;
 iuod.minvec   = 5;     % 5 is slightly stricter
 compVel = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt( ...
-    IM_a, IM_b, imSurfa.mask, imSurfb.mask, IntrWndw, GrdSpc, dcorGate, iuod);
-
+    IM_a, IM_b, Mask_a, Mask_b, IntrWndw, GrdSpc, dcorGate, iuod,debug_plot);
+% compVel =ComputeVelocities_Quick_NoFilt_Deform_Water(IM_a, IM_b, Mask_a, Mask_b, IntrWndw, GrdSpc);
     compVel.DX = DX;
     compVel.DT = DT;
 end
@@ -202,7 +227,7 @@ colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('z (m)')
 title('u\_raw (pix/dt)')
 daspect([1,1,1])
-clim([-2,20])
+clim([-2,25])
 
 subplot(1,2,2)
 h = imagesc(x, z, delta_z .* compVel.Mask);
@@ -211,7 +236,7 @@ colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('z (m)')
 title('w\_raw (pix/dt)')
 daspect([1,1,1])
-clim([-8,8])
+clim([-10,10])
 % hold on
 % quiver(x(1:skip:end), z(1:skip:end), ...
 %        u(1:skip:end, 1:skip:end), ...

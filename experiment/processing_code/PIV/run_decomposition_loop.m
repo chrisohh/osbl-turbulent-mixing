@@ -31,6 +31,15 @@ SU_OFFSET = 0;     % surface-image → PIV-image pixel offset
 %               false : use cached compVel if available
 recompute_piv = true;
 
+GLINT_BUFFER = 20;   % px below detected surface to exclude (glint/foam band)
+fprintf('Glint buffer: %d px = %.2f mm\n', GLINT_BUFFER, GLINT_BUFFER * DX * 1e3);
+
+IntrWndw = [128 128;
+             64 64;    %   shallow z to stay below surface
+             32 32;
+             16 16];
+GrdSpc = [IntrWndw(:,1)/2, IntrWndw(:,2)/2];
+
 % inter-pass UOD settings (same for all frames)
 iuod.enabled  = true;
 iuod.remove   = 2.0;
@@ -96,22 +105,23 @@ for ff = 1:N_frames
         load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_a.mat']); IMa = imgPiv;
         load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_b.mat']); IMb = imgPiv;
 
-        % frame-dependent pyramid
-        if pair_num <= 210
-            IntrWndw = [128 32;
-                         64 32;
-                         32 16];
-        else
-            IntrWndw = [256 64;
-                        128 32;
-                         64 32;
-                         32 16];
-        end
-        GrdSpc = [IntrWndw(:,1)/2, IntrWndw(:,2)/2];
-        GrdSpc(end,1) = IntrWndw(end,1)/4;
-
+%         % frame-dependent pyramid
+%         if pair_num <= 210
+%             IntrWndw = [128 32;
+%                          64 32;
+%                          32 16];
+%         else
+%             IntrWndw = [256 64;
+%                         128 32;
+%                          64 32;
+%                          32 16];
+%         end
+%         GrdSpc = [IntrWndw(:,1)/2, IntrWndw(:,2)/2];
+%         GrdSpc(end,1) = IntrWndw(end,1)/4;
+        Mask_a = apply_glint_buffer(imSurfa, GLINT_BUFFER);
+        Mask_b = apply_glint_buffer(imSurfb, GLINT_BUFFER);
         compVel = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt( ...
-            IMa, IMb, imSurfa.mask, imSurfb.mask, IntrWndw, GrdSpc, 0, iuod);
+            IMa, IMb, Mask_a, Mask_b, IntrWndw, GrdSpc, 0, iuod);
     end
     compVel.DX = DX; compVel.DT = DT;
 
@@ -129,9 +139,13 @@ for ff = 1:N_frames
         compVel.u_raw = u_raw; compVel.w_raw = w_raw;
     end
 
-    % --- save PIVMat only if newly computed ---
-    if ~cache_hit
-        save([piv_save exp_name '_compVel_' ps '.mat'], 'compVel', 'imSurfa', 'imSurfb');
+    % --- save PIVMat (new or recomputed) — slim imSurfa/imSurfb to mask+surface only ---
+    if ~cache_hit || recompute_piv
+        imSurfa = struct('mask', imSurfa.mask, 'surfacePIVImg', imSurfa.surfacePIVImg, ...
+                         'ImgScaledToPIVSmallCrop', imSurfa.ImgScaledToPIVSmallCrop);
+        imSurfb = struct('mask', imSurfb.mask, 'surfacePIVImg', imSurfb.surfacePIVImg, ...
+                         'ImgScaledToPIVSmallCrop', imSurfb.ImgScaledToPIVSmallCrop);
+        save([piv_save exp_name '_compVel_' ps '.mat'], 'compVel', 'imSurfa', 'imSurfb', '-v7');
     end
 
     % --- wave-following transform ---
@@ -174,6 +188,7 @@ for ff = 1:N_frames
     decomposedVel.compVel.w_orb_lab    = single(w_orb_lab);
     decomposedVel.compVel.SU           = single(SU);
     decomposedVel.compVel.pf_surf      = Surface_PIV;
+    decomposedVel.compVel.dcor         = single(compVel.dcor);  % correlation quality (NaN=air; use dcor<0.4 to mask before Reynolds stresses)
 
     save([turb_save exp_name '_compVel_' ps '.mat'], 'decomposedVel', 'pivRes');
 
