@@ -7,11 +7,15 @@ clear; clc;
 %% =========================================================================
 %% PARAMETERS
 %% =========================================================================
-LONG  = 'D:\DelawareDataBackup\Longitudinal\PIV\';
-ii    = 4;
-fps   = 7.2;
-DX    = 1/17697.69;   % m/pixel
-DT    = 10e-3;        % s/frame
+p = get_piv_params('ExpLCL_2_01');
+
+exp_name = p.exp_name;
+piv_save = p.piv_save;
+DX       = p.DX;            % 1/17697.69 m/pixel
+DT       = p.DT;            % 10e-3 s, inter-frame (A→B), for velocity scaling
+Fs_cam   = p.Fs_cam;        % 14.4 Hz — camera acquisition rate (images)
+Fs_PIV   = p.Fs_PIV;        % 7.2 Hz  — velocity map rate (one pair = two images)
+fps      = Fs_PIV;          % video frame rate matches acquisition
 
 clim_u = [-0.01  0.15];   % m/s  — adjust to your flow
 clim_w = [-0.05  0.05];   % m/s
@@ -19,9 +23,6 @@ clim_w = [-0.05  0.05];   % m/s
 %% =========================================================================
 %% PATHS
 %% =========================================================================
-DIRS     = dir(LONG); DIRS = DIRS(3:end);
-exp_name = DIRS(ii).name;
-piv_save = [LONG exp_name '/Chris_recompute/PIVMat/'];
 
 files = dir([piv_save exp_name '_compVel_*.mat']);
 nums  = cellfun(@(s) sscanf(s, [exp_name '_compVel_%d.mat']), {files.name});
@@ -68,20 +69,22 @@ for ff = 1:N
     ax1 = subplot(2,2,1);
     h = imagesc(x, z, u);
     set(h, 'AlphaData', ~isnan(u));
-    colormap(ax1, bwr); clim(clim_u); colorbar;
+    colormap(ax1, brewermap([], 'Spectral')); clim(clim_u); colorbar;
     hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
     xlabel('x (mm)'); ylabel('z (mm)');
     title('u_{raw} (m/s)'); axis tight;
-
+    clim([-0.01, 0.12])
+axis equal;axis tight
     % --- w_raw ---
     ax2 = subplot(2,2,2);
     h = imagesc(x, z, w);
     set(h, 'AlphaData', ~isnan(w));
-    colormap(ax2, bwr); clim(clim_w); colorbar;
+    colormap(ax2, brewermap([], 'Spectral')); clim(clim_w); colorbar;
     hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
     xlabel('x (mm)'); ylabel('z (mm)');
     title('w_{raw} (m/s)'); axis tight;
-
+clim([-0.04, 0.04])
+axis equal;axis tight
     % --- dcor (full bottom row) ---
     ax3 = subplot(2,2,[3 4]);
     h = imagesc(x, z, d);
@@ -90,7 +93,7 @@ for ff = 1:N
     hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
     xlabel('x (mm)'); ylabel('z (mm)');
     title('dcor  (0=no peak, 1=sharp peak)'); axis tight;
-
+axis equal;axis tight
     sgtitle(sprintf('%s  frame %d/%d', exp_name, ff-1, N-1), 'Interpreter','none');
     drawnow;
     writeVideo(vw, getframe(fig));

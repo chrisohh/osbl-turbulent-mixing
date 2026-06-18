@@ -9,30 +9,36 @@ clear; clc;
 %% =========================================================================
 %% PARAMETERS
 %% =========================================================================
-LONG     = 'D:\DelawareDataBackup\Longitudinal\PIV\';
-ii       = 4;            % experiment index
-fps      = 7.2;
-DX       = 1/17697.69;   % m/pixel
-DT       = 10e-3;        % s/frame
+p = get_piv_params('ExpLCL_2_01');
+
+exp_name  = p.exp_name;
+turb_save = p.turb_save;
+DX        = p.DX;           % 1/17697.69 m/pixel
+DT        = p.DT;           % 10e-3 s, inter-frame (A→B), for velocity scaling
+Fs_cam    = p.Fs_cam;       % 14.4 Hz — camera acquisition rate (images)
+Fs_PIV    = p.Fs_PIV;       % 7.2 Hz  — velocity map rate (one pair = two images)
+fps       = Fs_PIV;         % video frame rate matches acquisition
+
+makeVideo = 0;          % rerun video
+frame     = 157;        % frame to plot
 
 %% =========================================================================
 %% PATHS
 %% =========================================================================
-DIRS      = dir(LONG); DIRS = DIRS(3:end);
-exp_name  = DIRS(ii).name;
-turb_save = [LONG exp_name '/Chris_recompute/PIVMat_TURB/'];
 
-files = dir([turb_save exp_name '_compVel_*.mat']);
+files = dir(fullfile(turb_save, [exp_name '_compVel_*.mat']));
 nums  = cellfun(@(s) sscanf(s, [exp_name '_compVel_%d.mat']), {files.name});
 [~,o] = sort(nums); files = files(o);
 N     = length(files);
 fprintf('Experiment: %s   Frames: %d\n', exp_name, N);
 
-out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s_rectIntrWndw.mp4', exp_name));
-vw = VideoWriter(out_name, 'MPEG-4');
-vw.FrameRate = fps;
-open(vw);
-
+if makeVideo == 1
+    clearvars vw
+    out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s_rectIntrWndw.mp4', exp_name));
+    vw = VideoWriter(out_name, 'MPEG-4');
+    vw.FrameRate = fps;
+    open(vw);
+end
 %% =========================================================================
 %% LOOP
 %% =========================================================================
@@ -40,8 +46,15 @@ fig = figure('Position',[700,100,800,800],'Color','white');
 
 set(gcf, 'DefaultAxesColor', [0.9 0.9 0.9])  % all subplots get gray NaN
 
-for ff = 1:N
-    S      = load([turb_save files(ff).name], 'decomposedVel', 'pivRes');
+if makeVideo == 1
+    frame_list = 1:N;
+else
+    frame_list = frame + 1;   % +1: title shows ff-1, so file index = frame+1
+end
+
+for ff = frame_list
+
+    S      = load(fullfile(turb_save, files(ff).name), 'decomposedVel', 'pivRes');
     cv     = S.decomposedVel.compVel;
     pivRes = S.pivRes;
 
@@ -68,12 +81,17 @@ for ff = 1:N
     end
     sgtitle(sprintf('%s  frame %d/%d', exp_name, ff-1, N-1), 'Interpreter','none');
     drawnow;
-    writeVideo(vw, getframe(fig));
 
-    if mod(ff,50) == 0
-        fprintf('  rendered %d / %d frames\n', ff, N);
+    if makeVideo == 1
+        writeVideo(vw, getframe(fig));
+        if mod(ff,50) == 0
+            fprintf('  rendered %d / %d frames\n', ff, N);
+        end
     end
 end
-close(vw);
-fprintf('Wrote %s (%d frames)\n', out_name, N);
+
+if makeVideo == 1
+    close(vw);
+    fprintf('Wrote %s (%d frames)\n', out_name, N);
+end
 

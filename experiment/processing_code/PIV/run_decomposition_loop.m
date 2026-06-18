@@ -10,19 +10,18 @@ clear; clc;
 %% =========================================================================
 %% PARAMETERS  (keep in sync with run_decomposition_linearWaveTheory.m)
 %% =========================================================================
-LONG = 'D:\DelawareDataBackup\Longitudinal\PIV\';
-
 rootpath = 'C:\Users\airsealab\Documents\GitHub';
 % rootpath = 'D:\Scripps';
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
-ii            = 4;
-num_of_digits = 3;
+p = get_piv_params('ExpLCL_2_01');
 
-DX = 1/17697.69;   % m per pixel
-DT = 10e-3;        % sec per image pair
+exp_name      = p.exp_name;
+DX            = p.DX;       % 1/17697.69 m/pixel
+DT            = p.DT;       % 10e-3 s, inter-frame (A→B), for velocity scaling
+num_of_digits = 3;
 
 SU_OFFSET = 0;     % surface-image → PIV-image pixel offset
 
@@ -54,14 +53,9 @@ val_opts.fill_gaps = true;
 %% =========================================================================
 %% PATHS
 %% =========================================================================
-DIRS = dir(LONG);
-DIRS = DIRS(3:end);
-exp_name  = DIRS(ii).name;
-load_path = [LONG exp_name];
-
-chris_path = [load_path '/Chris_recompute/'];
-piv_save   = [chris_path 'PIVMat/'];
-turb_save  = [chris_path 'PIVMat_TURB/'];
+load_path  = p.load_path;
+piv_save   = p.piv_save;
+turb_save  = p.turb_save;
 if ~exist(piv_save,  'dir'), mkdir(piv_save);  end
 if ~exist(turb_save, 'dir'), mkdir(turb_save); end
 
@@ -84,7 +78,7 @@ for ff = 1:N_frames
     ps = sprintf(['%0' num2str(num_of_digits) 'd'], pair_num);
 
     % --- load or compute compVel + surfaces ---
-    cf_orig = [piv_save exp_name '_compVel_' ps '.mat'];
+    cf_orig = fullfile(piv_save, [exp_name '_compVel_' ps '.mat']);
     cache_hit = exist(cf_orig, 'file');
     if cache_hit
         tmp     = load(cf_orig, 'compVel', 'imSurfa', 'imSurfb');
@@ -145,7 +139,7 @@ for ff = 1:N_frames
                          'ImgScaledToPIVSmallCrop', imSurfa.ImgScaledToPIVSmallCrop);
         imSurfb = struct('mask', imSurfb.mask, 'surfacePIVImg', imSurfb.surfacePIVImg, ...
                          'ImgScaledToPIVSmallCrop', imSurfb.ImgScaledToPIVSmallCrop);
-        save([piv_save exp_name '_compVel_' ps '.mat'], 'compVel', 'imSurfa', 'imSurfb', '-v7');
+        save(fullfile(piv_save, [exp_name '_compVel_' ps '.mat']), 'compVel', 'imSurfa', 'imSurfb', '-v7');
     end
 
     % --- wave-following transform ---
@@ -190,7 +184,7 @@ for ff = 1:N_frames
     decomposedVel.compVel.pf_surf      = Surface_PIV;
     decomposedVel.compVel.dcor         = single(compVel.dcor);  % correlation quality (NaN=air; use dcor<0.4 to mask before Reynolds stresses)
 
-    save([turb_save exp_name '_compVel_' ps '.mat'], 'decomposedVel', 'pivRes');
+    save(fullfile(turb_save, [exp_name '_compVel_' ps '.mat']), 'decomposedVel', 'pivRes');
 
 %     % --- accumulate 2D ensemble average ---
 %     if isempty(ensembleSum_u)

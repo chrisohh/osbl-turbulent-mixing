@@ -11,57 +11,54 @@ clear; clc;
 %% =========================================================================
 %% PARAMETERS
 %% =========================================================================
-LONG = 'D:\DelawareDataBackup\Longitudinal\PIV\';
-
-% rootpath = 'C:\Users\airsealab\Documents\GitHub';
-rootpath = 'D:\Scripps';
+rootpath = 'C:\Users\airsealab\Documents\GitHub';
+% rootpath = 'D:\Scripps';
 
 % Add paths to Fabrice's functions
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
-ii = 4;                     % experiment index
-image_pair_number = 176;    % sanity-check frame
+p = get_piv_params('ExpLCTB_2_01');
 
-DX = 1/17697.69;           % m per pixel
-DT = 10e-3;                % sec per image pair
+exp_name          = p.exp_name;
+DX                = p.DX;   % 1/17697.69 m/pixel
+DT                = p.DT;   % 10e-3 s, inter-frame (A→B), for velocity scaling
+image_pair_number = 244;    % sanity-check frame
+
+rerun = 0;                  %rerun PIV? or load compVel?
 
 %% =========================================================================
 %% LOAD DATA
 %% =========================================================================
-DIRS = dir(LONG);
-DIRS = DIRS(3:end);
-exp_name = DIRS(ii).name;
+load_path     = p.load_path;
+piv_save      = p.piv_save;
+turb_save     = p.turb_save;
+piv_folder     = p.piv_folder;     % 'PIV' (LCL) or 'PIVCC' (transverse)
+pivsurf_folder = p.pivsurf_folder; % 'PIVSURF' (LCL) or 'PIVSURFCC' (transverse)
 num_of_digits = 3;
-load_path = [LONG exp_name];
 
 pair_str = sprintf(['%0' num2str(num_of_digits) 'd'], image_pair_number);
-
 fprintf('Experiment: %s   Pair: %s\n', exp_name, pair_str);
 
-chris_path = [load_path '/Chris_recompute/'];
-piv_save   = [chris_path 'PIVMat/'];
-turb_save  = [chris_path 'PIVMat_TURB/'];
-
-compvel_file = [piv_save exp_name '_compVel_' pair_str '.mat'];
+compvel_file = fullfile(piv_save, [exp_name '_compVel_' pair_str '.mat']);
 if exist(compvel_file, 'file')
     fprintf('Loading compVel from %s\n', compvel_file);
     load(compvel_file,'imSurfa','imSurfb');
 else
     % --- Surface detection ---
 imSurfa = FindSurfaceCapillary( ...
-    [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' pair_str '_a.mat'], ...
+    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' pair_str '_a.mat'], ...
     findMask = true);
 imSurfb = FindSurfaceCapillary( ...
-    [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' pair_str '_b.mat'], ...
+    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' pair_str '_b.mat'], ...
     findMask = true);
 end
 
 %% --- Raw PIV image ---
-load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' pair_str '_a.mat']);
+load([load_path '/PIVRaw/' piv_folder '/' exp_name '_Piv_' pair_str '_a.mat']);
 IM_a = imgPiv;
-load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' pair_str '_b.mat']);
+load([load_path '/PIVRaw/' piv_folder '/' exp_name '_Piv_' pair_str '_b.mat']);
 IM_b = imgPiv;
 [height, width] = size(IM_a);
 
@@ -70,16 +67,17 @@ IM_b = imgPiv;
 %% =========================================================================
 %Raw surface camera
 figure;
-imagesc(imSurfa.ImgScaledToPIVSmallCrop,[0,300]);
+imagesc(imSurfa.ImgScaledToPIVSmallCrop,[0,300]);hold on;
+plot(imSurfa.surface_raw, '-r')
 colormap bone
 axis tight;axis equal
 title(sprintf('Surface Camera: %s frame %s', exp_name, pair_str), ...
     'Interpreter', 'none')
-
+set(gcf,'Color','white')
 %Raw PIV camera
 figure;
 subplot(1,2,1)
-imagesc(IM_a,[0,300]);
+imagesc(IM_a,[0,500]);
 hold on;plot(imSurfa.surfacePIVImg, '-r', 'LineWidth', 1)
 colormap gray
 axis tight;axis equal
@@ -87,7 +85,7 @@ title(sprintf('PIV %s frame %s - A', exp_name, pair_str), ...
     'Interpreter', 'none')
 
 subplot(1,2,2)
-imagesc(IM_b,[0,300]);
+imagesc(IM_b,[0,500]);
 hold on;plot(imSurfb.surfacePIVImg, '-r', 'LineWidth', 1)
 colormap gray
 axis tight;axis equal
@@ -101,9 +99,7 @@ drawnow
 %% STEP 1 — CARTESIAN VELOCITY + SURFACE ON PIV IMAGE
 %% =========================================================================
 %% --- Load or compute velocity ---
-rerun = 1;
-
-compvel_file = [piv_save exp_name '_compVel_' pair_str '.mat'];
+compvel_file = fullfile(piv_save, [exp_name '_compVel_' pair_str '.mat']);
 if exist(compvel_file, 'file') && rerun==0
     fprintf('Loading compVel from %s\n', compvel_file);
     load(compvel_file,'compVel');
@@ -125,13 +121,13 @@ else
 % Residual displacement at each pass should also satisfy ¼ rule — after deformation removes the bulk, the residual should be < IW/4 at that level
 
 % Each row = one pyramid level: [IW_x, IW_z]
-GLINT_BUFFER = 20;   % tune to glint band thickness in pixels
+GLINT_BUFFER = 290;%20 for Longitudinal;   % tune to glint band thickness in pixels
 fprintf('Glint buffer: %d px = %.2f mm\n', GLINT_BUFFER, GLINT_BUFFER * DX * 1e3);
 Mask_a = apply_glint_buffer(imSurfa, GLINT_BUFFER);
 Mask_b = apply_glint_buffer(imSurfb, GLINT_BUFFER);
 
 figure;
-imagesc(IM_a, [0,300]);
+imagesc(IM_a, [0,500]);
 colormap(gca, gray)
 hold on;
 red_overlay = cat(3, ones(size(Mask_a)), zeros(size(Mask_a)), zeros(size(Mask_a)));
@@ -217,6 +213,8 @@ fprintf('PIV grid: %d x %d   Image: %d x %d\n', Nz_piv, Nx_piv, height, width);
 u_raw = delta_x .* compVel.Mask .* DX/DT;   % m/s, lab frame
 w_raw = delta_z .* compVel.Mask .* DX/DT;
 
+surf_z = interp1(1:numel(imSurfa.surfacePIVImg), imSurfa.surfacePIVImg, compVel.xPIV, 'linear', 'extrap') * DX;
+
 figure;
 
 set(gcf, 'DefaultAxesColor', [0.9 0.9 0.9])  % all subplots get gray NaN
@@ -224,19 +222,23 @@ subplot(1,2,1)
 h = imagesc(x, z, delta_x .* compVel.Mask);
 set(h, 'AlphaData', ~isnan(u_raw))
 colorbar; colormap(gca, brewermap([],'Spectral'))
+hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
 xlabel('x (m)'); ylabel('z (m)')
 title('u\_raw (pix/dt)')
 daspect([1,1,1])
-clim([-2,25])
+% clim([-2,25])
+clim([-5,5])
 
 subplot(1,2,2)
 h = imagesc(x, z, delta_z .* compVel.Mask);
 set(h, 'AlphaData', ~isnan(w_raw))
 colorbar; colormap(gca, brewermap([],'Spectral'))
+hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
 xlabel('x (m)'); ylabel('z (m)')
 title('w\_raw (pix/dt)')
 daspect([1,1,1])
-clim([-10,10])
+% clim([-10,10])
+clim([-5,5])
 % hold on
 % quiver(x(1:skip:end), z(1:skip:end), ...
 %        u(1:skip:end, 1:skip:end), ...
@@ -338,7 +340,7 @@ drawnow
 
 figure;
 subplot(1,2,1)
-imagesc(x,z_ax,ORBX * DX/DT)
+imagesc(x,z_ax,ORBX_ms)
 colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('\zeta (m)')
 title('u orbital (m/s)')
@@ -348,7 +350,7 @@ ylim([z_ax(1), z_ax(last_valid_row)])
 xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 
 subplot(1,2,2)
-imagesc(x,z_ax,ORBZ * DX/DT)
+imagesc(x,z_ax,ORBZ_ms)
 colorbar; colormap(gca, brewermap([],'Spectral'))
 xlabel('x (m)'); ylabel('\zeta (m)')
 title('w orbital (m/s)')

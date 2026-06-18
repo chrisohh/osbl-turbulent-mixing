@@ -19,20 +19,29 @@ function [CompVel] = ComputeVelocities_Quick_Filt_Deform_Water_dcorFilt(PIV1, PI
 %         When a new level's peak is no better than the prior, the prior
 %         displacement is carried forward instead of storing NaN.
 %         Prevents a bad near-surface window from collapsing the chain.
+%         Source: computeVelocities.m, computeVelocities_LfvOrb1,
+%                 computeVelocities_marc, PIV_FAB6_LfvOrb1 (Gilles/FAB6 2014)
 %
 %   [2] Incremental dcor gate
 %         Accept new estimate only when:  dcor_new >= dcor_prior - 0.5/lvl
 %         Tolerance tightens toward the finest level (lvl=4: tol=0.125).
 %         Makes going to IW=4 safe — empty windows lose the gate.
+%         Source: PIV_FAB6_incrementing_correlation_and_phase,
+%                 computeVelocities_LfvOrb1, PIV_FAB6_LfvOrb1 (Gilles/FAB6 2014)
 %
 %   [3] Decaying smoothing  S = 1/lvl/10  at global levels
 %         Level 1: S=0.1 (heavy gap-fill for deformation).
 %         Level N-1: S=1/(N-1)/10 (light, preserves structure).
 %         Final level: dcor-weighted smoothn with S=0 (see [4]).
+%         Source: computeVelocities.m, computeVelocities_LfvOrb1,
+%                 computeVelocities_marc, PIV_FAB6_LfvOrb1,
+%                 PIV_FAB6_incrementing_correlation_and_phase (Gilles/FAB6 2014)
 %
 %   [4] dcor-weighted final smoothn
-%         smoothn(delx, dcor_w, 0, 'robust') — high-dcor vectors
+%         smoothn(delx, dcor_w, 0.4, 'robust') — high-dcor vectors
 %         preserved; low-dcor vectors filled from good neighbours.
+%         Source: PIV_FAB6_LfvOrb1, PIV_FAB6_incrementing_correlation_and_phase
+%                 (Gilles/FAB6 2014) — S changed 0 -> 0.4
 %
 %   Mask convention: 1 = water (valid), NaN = air.
 %   Accepts both NaN/1 and 0/1 input masks — normalised internally.
@@ -75,7 +84,7 @@ if nargin >= 8 && isstruct(inter_uod_in)
     end
 end
 
-%% ---- Parse pyramid — support square (Nx1) and rectangular (Nx2) ----
+%% ---- Parse pyramid — support square (Nx1) and rectangular (Nx2) — original ----
 if size(IntrWndw, 2) == 2
     IWx = IntrWndw(:, 1);   % horizontal window sizes per level
     IWz = IntrWndw(:, 2);   % vertical   window sizes per level
@@ -106,7 +115,7 @@ IM2_D = PIV2;
 [h, w]   = size(PIV1);
 [X1, Y1] = meshgrid(1:w, 1:h);
 
-% Lateral mirror-pad: gives full IWs at left/right image edges (Davis-style)
+% Lateral mirror-pad: gives full IWs at left/right image edges (Davis-style) — original
 pad_x = 2 * max(IWx);
 w_orig = w;
 PIV1  = padarray(PIV1,  [0, pad_x], 'symmetric');  % mirror: gives contrast for coarse dcor gate
@@ -143,7 +152,7 @@ for lvl = 1:nLevels-1
         pdcor = zeros(bxsNh, bxsNw);   % prior dcor = 0 → gate always passes at lvl 1
     end
 
-    dcor_tol = 0.5 / lvl;   % [2] loosest at coarse, tightest at fine
+    dcor_tol = 0.5 / lvl;   % [2] PIV_FAB6_incrementing_correlation_and_phase, computeVelocities_LfvOrb1, PIV_FAB6_LfvOrb1
 
     bxCNTc = 1;
     for c = x
@@ -198,7 +207,7 @@ for lvl = 1:nLevels-1
                         delx(bxCNTr, bxCNTc) = pdelx(bxCNTr, bxCNTc) + ldelx + SubpixelX;
                         dely(bxCNTr, bxCNTc) = pdely(bxCNTr, bxCNTc) + ldely + SubpixelY;
                         dcor(bxCNTr, bxCNTc) = new_dcor;
-                    elseif keep_best
+                    elseif keep_best   % [1] computeVelocities.m, computeVelocities_LfvOrb1, computeVelocities_marc, PIV_FAB6_LfvOrb1
                         delx(bxCNTr, bxCNTc) = pdelx(bxCNTr, bxCNTc);
                         dely(bxCNTr, bxCNTc) = pdely(bxCNTr, bxCNTc);
                         dcor(bxCNTr, bxCNTc) = dcor_prev;
@@ -228,13 +237,16 @@ for lvl = 1:nLevels-1
     end
 
     % Inter-pass UOD (optional) — clean displacement field before deformation
+    % UOD math: computeVelocities.m, computeVelocities_LfvOrb1, computeVelocities_marc, PIV_FAB6_LfvOrb1 (Gilles/FAB6 2014)
+    % struct interface and placement before deformation: original
     if inter_uod.enabled
         mk_lvl = double(~isnan(delx));   % 1=valid, NaN=air at this grid
         mk_lvl(mk_lvl == 0) = NaN;
         [delx, dely] = interpass_uod(delx, dely, mk_lvl, inter_uod);
     end
 
-    % [3] Decaying smoothing — suppress mirror-padded columns first so smoothn
+    % [3] computeVelocities.m, computeVelocities_LfvOrb1, computeVelocities_marc, PIV_FAB6_LfvOrb1,
+    %     PIV_FAB6_incrementing_correlation_and_phase — suppress mirror-padded columns first so smoothn
     %     fills them from interior rather than averaging reflected velocities
     pad_cols = (x < pad_x+1) | (x > pad_x+w_orig);
     delx(:, pad_cols) = NaN;
@@ -308,7 +320,7 @@ dely = pdely;
 dcor = NaN(bxsNh, bxsNw);
 MASK = NaN(bxsNh, bxsNw);
 
-dcor_tol = 0.5 / lvl;
+dcor_tol = 0.5 / lvl;   % [2] PIV_FAB6_incrementing_correlation_and_phase, computeVelocities_LfvOrb1, PIV_FAB6_LfvOrb1
 
 bxCNTc = 1;
 for c = x
@@ -360,7 +372,7 @@ for c = x
                     dely(bxCNTr, bxCNTc) = pdely(bxCNTr, bxCNTc) + ldely + SubpixelY;
                     dcor(bxCNTr, bxCNTc) = new_dcor;
                 else
-                    % [1] Cascade keep-best
+                    % [1] computeVelocities.m, computeVelocities_LfvOrb1, computeVelocities_marc, PIV_FAB6_LfvOrb1
                     delx(bxCNTr, bxCNTc) = pdelx(bxCNTr, bxCNTc);
                     dely(bxCNTr, bxCNTc) = pdely(bxCNTr, bxCNTc);
                     dcor(bxCNTr, bxCNTc) = dcor_prev;
@@ -379,7 +391,7 @@ for c = x
     bxCNTc = bxCNTc + 1;
 end
 
-% [4] dcor-weighted final smoothn — suppress mirror-padded columns first
+% [4] PIV_FAB6_LfvOrb1, PIV_FAB6_incrementing_correlation_and_phase — dcor-weighted final smoothn (S changed 0->0.4); suppress mirror-padded columns first
 [X, Y] = meshgrid(x, y);
 pad_cols = (x < pad_x+1) | (x > pad_x+w_orig);
 delx(:, pad_cols) = NaN;
@@ -453,6 +465,9 @@ end
 % =========================================================================
 function [u, w] = interpass_uod(u, w, mk, p)
 % UOD between pyramid passes — cleans displacement field before image deformation.
+% Normalised median test: Westerweel & Scarano (2005).
+% Source: computeVelocities.m, computeVelocities_LfvOrb1, computeVelocities_marc,
+%         PIV_FAB6_LfvOrb1 (Gilles/FAB6 2014)
 % Conservative: skips vectors with fewer than p.minvec valid neighbours.
 u0   = u;
 w0   = w;
