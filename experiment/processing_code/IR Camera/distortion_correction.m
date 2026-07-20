@@ -1,27 +1,27 @@
-load("\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000017_f3705.mat")
+load("\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000026_f1268.mat")
 figure;
 imagesc(Frame)
 
 %%
 % Initialize parameters
-file_numbers = 2876:2886;
+file_numbers = 1;%2876:2886;
 num_files = length(file_numbers);
-file_path='\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000017_background\';
+file_path='\\Airseaserver28\D\HLAB_2026\IR_camera\';
 % Load first file to get dimensions
-first_file = sprintf('Rec-000017_%d.mat', file_numbers(1));
+first_file = 'Rec-000026_background.mat';% sprintf('Rec-000026_%d.mat', file_numbers(1));
 data = load(strcat(file_path,first_file));
 img_sum = double(data.Frame);  % Convert to double for accuracy
 
-% Loop through remaining files and accumulate
-for i = 2:num_files
-    filename = sprintf('Rec-000017_%d.mat', file_numbers(i));
-    data = load(strcat(file_path,filename));
-    img_sum = img_sum + double(data.Frame);
-end
+% % Loop through remaining files and accumulate
+% for i = 1:num_files
+%     filename = first_file;%sprintf('Rec-000017_%d.mat', file_numbers(i));
+%     data = load(strcat(file_path,filename));
+%     img_sum = img_sum + double(data.Frame);
+% end
 
-% Compute time average
-img_avg = img_sum / num_files;
-
+% % Compute time average
+% img_avg = img_sum / num_files;
+img_avg = img_sum;
 % Display result
 figure;
 imagesc(img_avg);
@@ -29,7 +29,7 @@ colorbar;
 title('Time-Averaged Image');
 axis equal tight;
 %%
-mask = img_avg < 18.6;
+mask = img_avg < 18.7;
 
 %%
 masked_data=(Frame-img_avg).*mask;
@@ -43,7 +43,7 @@ xlabel('')
 
 %%
 % Threshold to find walls (adjust based on your image)
-wallTemp = 18.5;  % or whatever temp the walls are at
+wallTemp = 18.7;  % or whatever temp the walls are at
 tolerance = 0.1;  % degrees
 
 wallMask = abs(Frame - wallTemp) < tolerance;
@@ -61,97 +61,150 @@ edges = edge(wallMask, 'Canny');
 figure;
 imagesc(edges);
 title('Detected edges - verify walls are captured');
+%% Manual wall control point picker
+% Run this AFTER you have img_avg, Frame, and masked_data in workspace.
+% It replaces Steps 2–4 from your original script.
 
-%% Step 2: Identify left and right walls
-% Assume walls are the leftmost and rightmost continuous edges
-% For each row, find the leftmost and rightmost edge pixels
+% figure('Position', [100 100 900 900]);
+% imagesc(Frame);
+% colormap(hot);
+% colorbar;
+% axis equal tight;
+% title('Click LEFT wall points top-to-bottom, then press Enter');
+% xlabel('Pixel X');
+% ylabel('Pixel Y');
 
-leftWall_x = nan(512, 1);
-leftWall_y = (1:512)';
-rightWall_x = nan(512, 1);
-rightWall_y = (1:512)';
+% --- Pick left wall points ---
+% ginput returns [x, y] pairs. Click along the left wall, press Enter when done.
+[x_left_manual, y_left_manual] = ginput();
+% ginput returns (col, row) which is (x, y) in image coords — that's what we want.
 
-for row = 1:512
-    edgePixels = find(edges(row, :));
-    
-    if ~isempty(edgePixels)
-        % Left wall is the leftmost edge in this row
-        leftWall_x(row) = edgePixels(1);
-        % Right wall is the rightmost edge in this row
-        rightWall_x(row) = edgePixels(end);
-    end
-end
-
-% Remove NaN values (rows where no edges were detected)
-validLeft = ~isnan(leftWall_x);
-validRight = ~isnan(rightWall_x);
-
-x_left = leftWall_x(validLeft);
-y_left = leftWall_y(validLeft);
-x_right = rightWall_x(validRight);
-y_right = rightWall_y(validRight);
-
-% Plot detected wall points
-subplot(2,3,3);
-imagesc(Frame);
-colormap(hot);
-colorbar;
 hold on;
-plot(x_left, y_left, 'g.', 'MarkerSize', 3);
-plot(x_right, y_right, 'b.', 'MarkerSize', 3);
-axis equal tight;
-title('Detected wall points');
-legend('Left wall', 'Right wall');
+plot(x_left_manual, y_left_manual, 'g.', 'MarkerSize', 12);
+title('Now click RIGHT wall points top-to-bottom, then press Enter');
+drawnow;
 
-%% Step 3: Filter outliers using robust fitting
-% Remove obvious outliers before fitting
+% --- Pick right wall points ---
+[x_right_manual, y_right_manual] = ginput();
 
-% For left wall - remove points too far from median
-median_left = median(x_left);
-mad_left = median(abs(x_left - median_left)); % Median absolute deviation
-outliers_left = abs(x_left - median_left) > 3 * mad_left;
-x_left_clean = x_left(~outliers_left);
-y_left_clean = y_left(~outliers_left);
+hold on;
+plot(x_right_manual, y_right_manual, 'b.', 'MarkerSize', 12);
+title('Points placed — fitting polynomials...');
+drawnow;
 
-% For right wall
-median_right = median(x_right);
-mad_right = median(abs(x_right - median_right)); 
-outliers_right = abs(x_right - median_right) > 3 * mad_right;
-x_right_clean = x_right(~outliers_right);
-y_right_clean = y_right(~outliers_right);
+%% Fit polynomials through your manual points
+polyOrder = 2;  % bump to 3 or 4 if you need more curvature
 
-fprintf('Left wall: %d points, %d outliers removed\n', length(x_left), sum(outliers_left));
-fprintf('Right wall: %d points, %d outliers removed\n', length(x_right), sum(outliers_right));
+p_left  = polyfit(y_left_manual,  x_left_manual,  polyOrder);
+p_right = polyfit(y_right_manual, x_right_manual, polyOrder);
 
-%% Step 4: Fit polynomial curves to walls
-% Higher polynomial order captures barrel/pincushion distortion
-polyOrder = 2;  % Start with 5th order, adjust if needed
-
-% Fit left wall: x as function of y
-p_left = polyfit(y_left_clean, x_left_clean, polyOrder);
-
-% Fit right wall: x as function of y
-p_right = polyfit(y_right_clean, x_right_clean, polyOrder);
-
-% Evaluate fitted curves
-y_eval = 1:512;
-x_left_fit = polyval(p_left, y_eval);
+% Evaluate over full image height
+y_eval      = 1:512;
+x_left_fit  = polyval(p_left,  y_eval);
 x_right_fit = polyval(p_right, y_eval);
 
-% Plot fitted curves
-subplot(2,3,4);
-imagesc(Frame);
-colormap(hot);
-colorbar;
+% --- Overlay fits on the image ---
 hold on;
-plot(x_left_clean, y_left_clean, 'g.', 'MarkerSize', 3);
-plot(x_right_clean, y_right_clean, 'b.', 'MarkerSize', 3);
-plot(x_left_fit, y_eval, 'g-', 'LineWidth', 3);
-plot(x_right_fit, y_eval, 'b-', 'LineWidth', 3);
-axis equal tight;
-title(sprintf('Fitted walls (order %d)', polyOrder));
+plot(x_left_fit,  y_eval, 'g-', 'LineWidth', 2);
+plot(x_right_fit, y_eval, 'b-', 'LineWidth', 2);
 legend('Left points', 'Right points', 'Left fit', 'Right fit');
+title(sprintf('Manual wall fit (order %d)', polyOrder));
 
+% If the fit still doesn't match what you see, increase polyOrder to 3 or 4
+% and re-run just this cell.
+
+fprintf('Left  wall poly coeffs:  '); disp(p_left);
+fprintf('Right wall poly coeffs:  '); disp(p_right);
+% %% Step 2: Identify left and right walls
+% % Assume walls are the leftmost and rightmost continuous edges
+% % For each row, find the leftmost and rightmost edge pixels
+% 
+% leftWall_x = nan(512, 1);
+% leftWall_y = (1:512)';
+% rightWall_x = nan(512, 1);
+% rightWall_y = (1:512)';
+% 
+% for row = 1:512
+%     edgePixels = find(edges(row, :));
+% 
+%     if ~isempty(edgePixels)
+%         % Left wall is the leftmost edge in this row
+%         leftWall_x(row) = edgePixels(1);
+%         % Right wall is the rightmost edge in this row
+%         rightWall_x(row) = edgePixels(end);
+%     end
+% end
+% 
+% % Remove NaN values (rows where no edges were detected)
+% validLeft = ~isnan(leftWall_x);
+% validRight = ~isnan(rightWall_x);
+% 
+% x_left = leftWall_x(validLeft);
+% y_left = leftWall_y(validLeft);
+% x_right = rightWall_x(validRight);
+% y_right = rightWall_y(validRight);
+% 
+% % Plot detected wall points
+% subplot(2,3,3);
+% imagesc(Frame);
+% colormap(hot);
+% colorbar;
+% hold on;
+% plot(x_left, y_left, 'g.', 'MarkerSize', 3);
+% plot(x_right, y_right, 'b.', 'MarkerSize', 3);
+% axis equal tight;
+% title('Detected wall points');
+% legend('Left wall', 'Right wall');
+% 
+% %% Step 3: Filter outliers using robust fitting
+% % Remove obvious outliers before fitting
+% 
+% % For left wall - remove points too far from median
+% median_left = median(x_left);
+% mad_left = median(abs(x_left - median_left)); % Median absolute deviation
+% outliers_left = abs(x_left - median_left) > 3 * mad_left;
+% x_left_clean = x_left(~outliers_left);
+% y_left_clean = y_left(~outliers_left);
+% 
+% % For right wall
+% median_right = median(x_right);
+% mad_right = median(abs(x_right - median_right)); 
+% outliers_right = abs(x_right - median_right) > 3 * mad_right;
+% x_right_clean = x_right(~outliers_right);
+% y_right_clean = y_right(~outliers_right);
+% 
+% fprintf('Left wall: %d points, %d outliers removed\n', length(x_left), sum(outliers_left));
+% fprintf('Right wall: %d points, %d outliers removed\n', length(x_right), sum(outliers_right));
+% 
+% %% Step 4: Fit polynomial curves to walls
+% % Higher polynomial order captures barrel/pincushion distortion
+% polyOrder =2;  % Start with 5th order, adjust if needed
+% 
+% % Fit left wall: x as function of y
+% p_left = polyfit(y_left_clean, x_left_clean, polyOrder);
+% 
+% % Fit right wall: x as function of y
+% p_right = polyfit(y_right_clean, x_right_clean, polyOrder);
+% 
+% % Evaluate fitted curves
+% y_eval = 1:512;
+% x_left_fit = polyval(p_left, y_eval);
+% x_right_fit = polyval(p_right, y_eval);
+% 
+% % Plot fitted curves
+% subplot(2,3,4);
+% imagesc(Frame);
+% colormap(hot);
+% colorbar;
+% hold on;
+% plot(x_left_clean, y_left_clean, 'g.', 'MarkerSize', 3);
+% plot(x_right_clean, y_right_clean, 'b.', 'MarkerSize', 3);
+% plot(x_left_fit, y_eval, 'g-', 'LineWidth', 3);
+% plot(x_right_fit, y_eval, 'b-', 'LineWidth', 3);
+% axis equal tight;
+% title(sprintf('Fitted walls (order %d)', polyOrder));
+% legend('Left points', 'Right points', 'Left fit', 'Right fit');
+% 
 
 %% Step 5: Analyze distortion
 % Plot wall separation vs. y position to see distortion pattern
@@ -260,7 +313,7 @@ title('Original');
 xlabel('Pixel X');
 ylabel('Pixel Y');
 legend('Wall outline');
-clim([-0.2,0.2])
+% clim([-0.2,0.2])
 subplot(1,2,2);
 imagesc(x_regular*100, y_regular*100, frameData_corrected);
 colormap(hot);
@@ -269,4 +322,4 @@ axis equal tight;
 title('Distortion corrected');
 xlabel('Cross-wind (cm)');
 ylabel('Along-wind (cm)');
-clim([-0.2,0.2])
+% clim([-0.2,0.2])
