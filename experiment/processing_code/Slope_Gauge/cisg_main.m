@@ -1,18 +1,21 @@
 %% CISG Main Script - Complete Workflow for CoreView Data
 clear all;
+addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% Setup parameters
 coreview_num = 22;
 coreview_ref_num = 19;%coreview_num
-ref_fileName= sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_01.raw", coreview_ref_num,coreview_ref_num);
+cache_root   = 'D:\HLAB_2026\SlopeGauge';
+raw_root = '\\Airseaserver28\D\HLAB_2026\SlopeGauge';
+ref_fileName=  fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_01.raw', coreview_ref_num,coreview_ref_num));
 
-obs_folderName = sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\Flare 12M125 CCL C1112A00\\", coreview_num);
+obs_folderName = fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\', coreview_num));
 fs = 50;  % Hz
 dt = 1/fs;  % 0.02 seconds between frames
 
 % Physical setup (ADJUST THESE TO YOUR ACTUAL MEASUREMENTS)
 setup = struct();
-setup.camera_height = 41.7;            % cm above water surface (MEASURE THIS)
+% setup.camera_height = 41.7;            % cm above water surface (not used in this code)
 setup.water_depth = 49;              % cm from water surface to pattern (MEASURE THIS)
 % setup.pattern_width_cm = 20*2.54;    % 50.8 cm (your printed pattern)
 % setup.pattern_height_cm = 20*2.54;   % 50.8 cm
@@ -22,7 +25,7 @@ setup.frame_rate = fs;
 setup.dt = dt;
 
 fprintf('===== CISG PROCESSING SETUP =====\n');
-fprintf('Data folder: %s\n', ref_folderName);
+fprintf('Data folder: %s\n', raw_root);
 fprintf('Frame rate: %d Hz (dt = %.4f s)\n', fs, dt);
 fprintf('Camera height: %.1f cm\n', setup.camera_height);
 fprintf('Water depth: %.1f cm\n', setup.water_depth);
@@ -30,7 +33,7 @@ fprintf('Water depth: %.1f cm\n', setup.water_depth);
 
 %% Load calibration
 % mat produced from cisg_spatial_calibration.m
-cal = load('CISG_Calibration_CoreView_6.mat');
+cal = load(strcat(raw_root,'\Processed\CISG_Calibration_CoreView_6.mat'));
 cal = cal.cal;
 setup.cm_per_pixel_x = cal.cm_per_pixel_x;
 setup.cm_per_pixel_y = cal.cm_per_pixel_y;
@@ -68,86 +71,83 @@ colormap(gca, 'gray');
 
 fprintf('Reference image loaded: %d x %d\n\n', size(ref_image,1), size(ref_image,2));
 
-%% find where to crop from the reference image
-% Define valid region - click 4 corners on reference
-figure('Name', 'Select valid region - Click 4 corners', 'Position', [100 100 1200 800]);
-imshow(ref_image);
-title('Click 4 corners of valid region (any order)');
+%% Pick outer ROI (will be baked into the cache — pick generously)
+setup.roi = pick_roi_interactive(ref_image, [], ...
+    setup.cm_per_pixel_x, setup.cm_per_pixel_y, ...
+    'Outer ROI for slope cache (cannot be expanded without re-extracting)');
 
-fprintf('Click 4 corners...\n');
-[cx, cy] = ginput(4);
-
-% Sort points into left/right and top/bottom
-% Left side: 2 points with smallest x, right side: 2 with largest x
-[cx_sorted, idx] = sort(cx);
-left_pts = idx(1:2);   % two leftmost
-right_pts = idx(3:4);  % two rightmost
-
-col_min = ceil(max(cx(left_pts)));    % rightmost of the left points
-col_max = floor(min(cx(right_pts)));  % leftmost of the right points
-
-[cy_sorted, idx] = sort(cy);
-top_pts = idx(1:2);    % two smallest y (top of image)
-bottom_pts = idx(3:4); % two largest y (bottom of image)
-
-row_min = ceil(max(cy(top_pts)));     % lowest of the top points
-row_max = floor(min(cy(bottom_pts))); % highest of the bottom points
-
-setup.roi = struct('row_min', row_min, 'row_max', row_max, ...
-    'col_min', col_min, 'col_max', col_max);
-
-% Create mask
 setup.valid_mask = false(img_height, img_width);
-setup.valid_mask(row_min:row_max, col_min:col_max) = true;
+setup.valid_mask(setup.roi.row_min:setup.roi.row_max, ...
+                 setup.roi.col_min:setup.roi.col_max) = true;
 
-fprintf('  ROI: rows [%d, %d], cols [%d, %d]\n', row_min, row_max, col_min, col_max);
+%% Process frames — write per-frame ROI-cropped cache (resumable)
+raw_pattern = sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_*.raw', coreview_num);
+raw_listing = dir(fullfile(obs_folderName, raw_pattern));
+totalFrames = numel(raw_listing);
+if totalFrames == 0
+    error('cisg_main:no_raw', 'No raw frames matched %s in %s', raw_pattern, obs_folderName);
+end
+fprintf('Found %d raw frames in %s\n', totalFrames, obs_folderName);
 
-%% Process frames
-totalFrames = 2291;
-start_frame = 1421;
-end_frame = totalFrames;
+time = (1:totalFrames - 1) * dt;
+
+out_root = 'D:\HLAB_2026\SlopeGauge';
+out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+
+save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
+     'coreview_num', 'img_height', 'img_width');
+fprintf('Wrote metadata: %s\n', fullfile(out_dir, 'metadata.mat'));
+%%
+start_frame = 1101;
+end_frame = 1101;%totalFrames;
 frames_to_process = start_frame:10:end_frame;
 nFrames = length(frames_to_process);
 
-time = (frames_to_process - 1) * dt;
-
 fprintf('===== PROCESSING FRAMES %d to %d (%d frames) =====\n', start_frame, end_frame, nFrames);
+fprintf('Cache dir: %s\n', out_dir);
 
-% Write directly to disk
-% mat_fileName = sprintf('CISG_slopes_CoreView_%d.mat', coreview_num);
-% m = matfile(mat_fileName, 'Writable', true);
-% initialize zeros with 2 pages to force it to recognize 3D matrix
-% m.Sx = zeros(img_height, img_width, 2, 'single');
-% m.Sy = zeros(img_height, img_width, 2, 'single');
-
+r = setup.roi;
 tic;
+n_done    = 0;
+n_skipped = 0;
 for count = 1:nFrames
     n = frames_to_process(count);
-    obs_fileName = sprintf("CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw", coreview_num, n);
-    [obs_image, ~] = cisg_load_coreview(strcat(sprintf("\\\\airseaserver28\\D\\HLAB_2026\\SlopeGauge\\CoreView_%d\\CoreView_%d\\Flare 12M125 CCL C1112A00\\", coreview_num,coreview_num), obs_fileName));
-    
-    [sx, sy] = cisg_calculate_slopes(ref_image, obs_image, setup);
+    frame_path = fullfile(out_dir, sprintf('frame_%04d.mat', n));
 
-    m.Sx(:,:,count+142) = single(sx);
-    m.Sy(:,:,count+142) = single(sy);
-   
-    if mod(count, 10) == 0
+    if exist(frame_path, 'file')
+        n_skipped = n_skipped + 1;
+        continue;
+    end
+
+    obs_fileName = sprintf("CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw", coreview_num, n);
+    [obs_image, ~] = cisg_load_coreview(strcat(obs_folderName, obs_fileName));
+
+    [sx_full, sy_full] = cisg_calculate_slopes(ref_image, obs_image, setup);
+
+    Sx = single(sx_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
+    Sy = single(sy_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
+    t  = time(count);                                               %#ok<NASGU>
+    save(frame_path, 'Sx', 'Sy', 'n', 't', '-v7');
+    n_done = n_done + 1;
+
+    if mod(count, 25) == 0
         elapsed = toc;
-        fps_processing = count / elapsed;
-        est_remaining = (nFrames - count) / fps_processing;
-        fprintf('  Frame %d/%d (%.1f%%) - %.1f fps - ETA: %.1f sec\n', ...
-            count, nFrames, 100*count/nFrames, fps_processing, est_remaining);
+        fps_processing = n_done / max(elapsed, eps);
+        est_remaining  = (nFrames - count) / max(fps_processing, eps);
+        fprintf('  Frame %d/%d (%.1f%%) — wrote %d, skipped %d — %.2f fps — ETA: %.0f s\n', ...
+                count, nFrames, 100*count/nFrames, n_done, n_skipped, fps_processing, est_remaining);
     end
 end
 total_time = toc;
 
-m.time = time;
-m.setup = setup;
+fprintf('\n Cache build complete.\n');
+fprintf('  Wrote %d new frames, skipped %d existing.\n', n_done, n_skipped);
+fprintf('  Total time: %.1f s\n', total_time);
+fprintf('  Cache dir:  %s\n\n', out_dir);
 
-fprintf('\n✓ Processing complete!\n');
-fprintf('  Total time: %.1f seconds\n', total_time);
-fprintf('  Average speed: %.1f fps\n', nFrames/total_time);
-fprintf('  Saved: %s\n\n', mat_fileName);
+return;  % Sections below are legacy (operate on the old monolithic matfile or workspace Sx/Sy).
+         % Run them by hand via the cell markers if needed.
 
 % Process each frame
 % tic;
@@ -207,60 +207,138 @@ tiledlayout(1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 frames_to_show = [228];%[1, round(size(m.Sx,3)/2), size(m.Sx,3)];
 
 % Physical axes centered on ROI center
-nx = setup.roi.col_max - setup.roi.col_min + 1;
-ny = setup.roi.row_max - setup.roi.row_min + 1;
+nx = img_width;
+ny = img_height;
 x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
 y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
 
 for i = 1:length(frames_to_show)
-    Sx_frame = double(m.Sx(setup.roi.row_min:setup.roi.row_max, ...
+    Sx_frame = double(Sx(setup.roi.row_min:setup.roi.row_max, ...
                            setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
     imagesc(x_cm, y_cm, Sx_frame);
     axis equal tight; colorbar;
     title(sprintf('S_x: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'turbo');
+    colormap(gca, 'redblue');
     caxis([-0.2,0.2]);
 end
 
 for i = 1:length(frames_to_show)
-    Sy_frame = double(m.Sy(setup.roi.row_min:setup.roi.row_max, ...
+    Sy_frame = double(Sy(setup.roi.row_min:setup.roi.row_max, ...
                            setup.roi.col_min:setup.roi.col_max, frames_to_show(i)));
     
     nexttile;
     imagesc(x_cm, y_cm, Sy_frame);
     axis equal tight; colorbar;
     title(sprintf('S_y: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'turbo');
+    colormap(gca, 'redblue');
     caxis([-0.2,0.2]);
 end
 
 
-for i = 1:length(frames_to_show)
-    frame_num = frames_to_show(i);
-    Smag = sqrt(double(m.Sx(:,:,frames_to_show(i))).^2 + double(m.Sy(:,:,frames_to_show(i))).^2);
-    Smag = Smag(setup.roi.row_min:setup.roi.row_max, ...
-                           setup.roi.col_min:setup.roi.col_max);
-    
-    nexttile;
-    imagesc(x_cm, y_cm, Smag);
-    axis equal tight; colorbar;
-    title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
-    colormap(gca, 'hot');
-    caxis([0,0.3]);
-end
+% for i = 1:length(frames_to_show)
+%     frame_num = frames_to_show(i);
+%     Smag = sqrt(double(m.Sx(:,:,frames_to_show(i))).^2 + double(m.Sy(:,:,frames_to_show(i))).^2);
+%     Smag = Smag(setup.roi.row_min:setup.roi.row_max, ...
+%                            setup.roi.col_min:setup.roi.col_max);
+% 
+%     nexttile;
+%     imagesc(x_cm, y_cm, Smag);
+%     axis equal tight; colorbar;
+%     title(sprintf('|S|: Frame %d (t=%.2fs)', frames_to_show(i)*10, time(frames_to_show(i))));
+%     colormap(gca, 'hot');
+%     caxis([0,0.3]);
+% end
 
-%% Make a video
+%% Make a video with memory-efficient loading
+
+%% Load and view a single frame from the matfile
+
+folderName = 'Y:\HLAB_2026\SlopeGauge\Processed\';
+coreview_num = 22;
+mat_fileName = strcat(folderName, sprintf('CISG_slopes_CoreView_%d.mat', coreview_num));
+
+% Connect to matfile WITHOUT loading all data
+m = matfile(mat_fileName);
+
+% Check dimensions
+[img_height, img_width, nFrames] = size(m, 'Sx');
+fprintf('Data dimensions: %d x %d x %d frames\n', img_height, img_width, nFrames);
+
+nx = img_width;
+ny = img_height;
+x_cm = ((1:nx) - nx/2) * setup.cm_per_pixel_x;
+y_cm = ((1:ny) - ny/2) * setup.cm_per_pixel_y;
+
+%% Visualize the single frame
+% Load just ONE frame (e.g., frame 500)
+frame_num = 228;
+Sx_single = m.Sx(:, :, frame_num);
+Sy_single = m.Sy(:, :, frame_num);
+time_single = m.time(1, frame_num);
+% Load just ONE frame (e.g., frame 500)
+% frame_num = 10;
+% Sx_single = Sx(:, :, frame_num);
+% Sy_single = Sy(:, :, frame_num);
+% time_single = time(1, frame_num);
+%%
+figure('Position', [100 100 1000 600], 'Color', 'white');
+
+% Sx plot
+subplot(1,2,1)
+imagesc(x_cm, y_cm,Sx_single);
+axis equal tight;
+c=colorbar;
+colormap(gca, 'redblue');
+caxis([-0.4, 0.4]);
+title(sprintf('$S_x$ at $t = %.2f$ s', (frame_num-1)*dt*10),'Interpreter','latex');
+xlabel('$x$ (cm)', 'interpreter','latex');
+ylabel('$y$ (cm)', 'interpreter','latex');
+set(gca, 'fontsize',14,'fontname','times')
+c.Label.String='$ak$';
+c.Label.Interpreter='latex';
+c.Label.FontSize=16;
+% Sy plot
+subplot(1,2,2)
+imagesc(x_cm, y_cm,Sy_single);
+axis equal tight;
+c=colorbar;
+colormap(gca, 'redblue');
+caxis([-0.4, 0.4]);
+title(sprintf('$S_y$ at $t = %.2f$ s', (frame_num-1)*dt*10),'Interpreter','latex');
+xlabel('$x$ (cm)', 'interpreter','latex');
+ylabel('$y$ (cm)', 'interpreter','latex');
+set(gca, 'fontsize',14,'fontname','times')
+c.Label.String='$ak$';
+c.Label.Interpreter='latex';
+c.Label.FontSize=16;
+%% Then, if you like what you see, create video for a range
+
+% Define your frame range
+frame_range = 1:nFrames;  % or whatever range you want
+
+fprintf('Loading frames %d to %d...\n', frame_range(1), frame_range(end));
+Sx_subset = m.Sx(:, :, frame_range);
+Sy_subset = m.Sy(:, :, frame_range);
+time_subset = time(frame_range);
+
+% Set video options
 opts = struct();
-opts.caxis_limits = [-0.2, 0.2];      % Sx/Sy limits
-opts.mag_caxis_limits = [0, 0.2];     % Magnitude limits (always 0 to positive)
-opts.fps = fs/10;
-opts.colormap = 'turbo';          % Modern alternative to jet
-opts.mag_colormap = 'hot';
+opts.caxis_limits = [-0.4, 0.4];           % Match your single frame plot
+opts.fps = m.setup.fs / 10;                % Frame rate
+opts.quality = 90;                         % Video quality
+opts.figure_position = [100 100 1000 600]; % Match your figure size
+opts.colorbar_label = '$ak$';              % Colorbar label
 
-video_folder='G:\Shared drives\AirSeaLab\Projects\SOARS\Data\20250108\';
-make_slope_video(Sx, Sy, time(500:510), strcat(video_folder,'slope_gauge_test_20260108.mp4'), opts);
+% Output path
+video_folder = 'Y:\HLAB_2026\SlopeGauge\Processed\';
+output_file = fullfile(video_folder, 'slope_gauge_20260108_skip10.mp4');
+
+% Create the video
+make_slope_video(Sx_subset, Sy_subset, time_subset, x_cm, y_cm, output_file, opts);
+
+fprintf('Video creation complete!\n');
 %% Statistics
 fprintf('\n===== SLOPE STATISTICS =====\n');
 Sx_all = Sx(:);
@@ -320,13 +398,14 @@ for i = 1:nFrames
     ak2_Sx(i) = mean(Sx_frame(:).^2);
     ak2_Sy(i) = mean(Sy_frame(:).^2);
 end
+%%
 
 figure('Name', 'Mean Square Slope Evolution');
 plot(time, ak2_Sx,'LineWidth',1.5); hold on;
 plot(time, ak2_Sy,'LineWidth',1.5);
-plot(time, ak2_Smag, '--k','LineWidth',1.5);
+% plot(time, ak2_Smag, '--k','LineWidth',1.5);
 xlabel('Time (s)');
 ylabel('$(ak)^2$', 'Interpreter', 'latex');
-legend('S_x', 'S_y', '|S|');
+legend('S_x', 'S_y');
 grid off;
-set(gca,'fontsize',12)
+set(gca,'fontsize',16)

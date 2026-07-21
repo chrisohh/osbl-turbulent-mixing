@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf \"/d/Scripps/osbl-turbulent-mixing/experiment/processing_code/PIV/.claude\" && echo \"removed\" && ls -la \"/d/Scripps/osbl-turbulent-mixing/experiment/processing_code/PIV/\" | grep claude)",
+      "Bash(ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/\" 2>/dev/null | head -30; echo \"---\"; ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/FabriceScripts/\" 2>/dev/null | head -30)"
+    ]
+  }
+}
