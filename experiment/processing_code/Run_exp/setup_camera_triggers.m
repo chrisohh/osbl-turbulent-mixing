@@ -17,13 +17,14 @@ function d = setup_camera_triggers(devID, camConfig)
 %   - each camConfig.ctr names a valid, unique counter on that device (ctr0-ctr3)
 %
 % NOT VERIFIED -- confirm before relying on this:
-%   - Whether DutyCycle is directly settable on a PulseGeneration channel in
-%     your DAQ Toolbox version, or whether PulseWidth must be set instead --
-%     after the first addoutput call, run properties(ch) at the command line
-%     to see what's actually exposed, and adjust the property-set block below
-%     if needed.
 %   - Whether InitialDelay is the correct property name for a per-channel
 %     start delay in your toolbox version.
+%
+% Pulse width vs. duty cycle: if the channel exposes a PulseWidth property
+% (seconds), that's used directly -- more precise for cameras like Color
+% that need an exact pulse width (e.g. 700us) regardless of frequency.
+% Falls back to DutyCycle (fraction of period) if PulseWidth isn't available
+% in this DAQ Toolbox version. Prints which one was actually used per channel.
 
     d = daq("ni");
 
@@ -32,13 +33,20 @@ function d = setup_camera_triggers(devID, camConfig)
 
         ch = addoutput(d, devID, cfg.ctr, "PulseGeneration");
         ch.Frequency = cfg.freq;
-        ch.DutyCycle = cfg.dutyCycle;   % <-- NOT VERIFIED, see header
+
+        if isprop(ch, 'PulseWidth')
+            pulseWidth = cfg.dutyCycle / cfg.freq;   % seconds
+            ch.PulseWidth = pulseWidth;
+            fprintf('%s configured on %s: %.1f Hz, PulseWidth = %.1f us\n', ...
+                cfg.name, cfg.ctr, cfg.freq, pulseWidth * 1e6);
+        else
+            ch.DutyCycle = cfg.dutyCycle;
+            fprintf('%s configured on %s: %.1f Hz, DutyCycle = %.4f (PulseWidth property not found)\n', ...
+                cfg.name, cfg.ctr, cfg.freq, cfg.dutyCycle);
+        end
 
         if cfg.delay ~= 0
             ch.InitialDelay = cfg.delay;   % <-- NOT VERIFIED, see header
         end
-
-        fprintf('%s configured on %s: %.1f Hz, %.1f%% duty\n', ...
-            cfg.name, cfg.ctr, cfg.freq, cfg.dutyCycle * 100);
     end
 end

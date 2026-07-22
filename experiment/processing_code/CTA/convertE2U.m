@@ -5,9 +5,10 @@
 
 %% Main Script
 % Load calibration data
-cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe1\probe1_ramp-up_50-200rpm.txt'; % Change to your header file
+cal_file='D:\Chris\osbl-turbulent-mixing\experiment\data\260721\probe3.txt';
+% cal_file = 'G:\My Drive\OSBL\CalibratorTest1\probe1\probe1_ramp-up_50-200rpm.txt'; % Change to your header file
 cal = parse_calibration(cal_file);
-
+T=23.4214;
 % Display extracted calibration
 fprintf('Calibration Coefficients Extracted:\n');
 fprintf('Sensor 1: C0=%.4f, C1=%.4f, C2=%.4f, C3=%.4f, C4=%.4f\n', ...
@@ -25,10 +26,10 @@ fprintf('Reference Terature: %.2f °C\n', cal.T_ref);
 
 %% Load Data
 % Assuming data file has columns: [Time, E1, E2, E3, T, U_ref]
-files = {'probe1_ramp-up_50-200rpm.txt', 'probe1_ramp-up_200-300rpm.txt', 'probe1_ramp-up_300-400rpm.txt'};%, 'ramp-up_600-800rpm.txt'};
-rpm_ranges = {[50,200], [200,400], [400,600], [600,800]};
+files = {'probe3_14cm_above_water.txt'};%;%{'probe1_ramp-up_50-200rpm.txt', 'probe1_ramp-up_200-300rpm.txt', 'probe1_ramp-up_300-400rpm.txt'};%, 'ramp-up_600-800rpm.txt'};
+rpm_ranges = {1.5,8};%{[50,200], [200,400], [400,600], [600,800]};
 
-base_path = 'G:\My Drive\OSBL\CalibratorTest1\probe1';
+base_path = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260721\';
 
 data_collection = struct();
 for n = 1:length(files)
@@ -43,67 +44,70 @@ time = data(:, 1);
 E1 = data(:, 2);
 E2 = data(:, 3);
 E3 = data(:, 4);
-E_T = data(:, 5);
-E_ref = data(:, 6);
+% E_T = data(:, 5);
+% E_ref = data(:, 6);
 
-%% Temperature conversion              
-cal.C0_T=5.3065;
-cal.C1_T=-25.309;
-cal.C2_T=-0.7779;
-cal.C3_T=-0.5073;
-
-% Temperature calibration using logarithmic-polynomial
-T = cal.C0_T + cal.C1_T*log(E_T) + cal.C2_T*log(E_T).^2 + ...
-    cal.C3_T*log(E_T).^3;
-
-%% Velocity reference transducer
-%% Dantec 54T29 Velocity Reference Transducer Calibration
-
-cal_ref.TR = 24.68;  % Temperature ratio
-cal_ref.PR = 100.2;  % Pressure ratio
-cal_ref.G1 = 60;     % Gain 1
-cal_ref.G2 = 20;     % Gain 2
-cal_ref.U0 = 0.05;   % Velocity breakpoint 0 (m/s)
-cal_ref.U1 = 0.5;    % Velocity breakpoint 1 (m/s)
-cal_ref.U2 = 8;      % Velocity breakpoint 2 (m/s)
-cal_ref.U3 = 33;     % Velocity breakpoint 3 (m/s)
+% %% Temperature conversion              
+% cal.C0_T=5.3065;
+% cal.C1_T=-25.309;
+% cal.C2_T=-0.7779;
+% cal.C3_T=-0.5073;
 % 
-% The 54T29 uses a segmented square-root relationship:
-% U = U_i + G_i * sqrt(E - E_i) for voltage range i
+% % Temperature calibration using logarithmic-polynomial
+% T = cal.C0_T + cal.C1_T*log(E_T) + cal.C2_T*log(E_T).^2 + ...
+%     cal.C3_T*log(E_T).^3;
+% 
+% %% Velocity reference transducer
+% %% Dantec 54T29 Velocity Reference Transducer Calibration
+% 
+% cal_ref.TR = 24.68;  % Temperature ratio
+% cal_ref.PR = 100.2;  % Pressure ratio
+% cal_ref.G1 = 60;     % Gain 1
+% cal_ref.G2 = 20;     % Gain 2
+% cal_ref.U0 = 0.05;   % Velocity breakpoint 0 (m/s)
+% cal_ref.U1 = 0.5;    % Velocity breakpoint 1 (m/s)
+% cal_ref.U2 = 8;      % Velocity breakpoint 2 (m/s)
+% cal_ref.U3 = 33;     % Velocity breakpoint 3 (m/s)
+% % 
+% % The 54T29 uses a segmented square-root relationship:
+% % U = U_i + G_i * sqrt(E - E_i) for voltage range i
+% 
+% % First, we need to calculate the voltage breakpoints from velocity breakpoints
+% % Rearranging: E = E_i + ((U - U_i)/G_i)^2
+% 
+% % Calculate voltage breakpoints (working backwards from velocity breakpoints)
+% % Use different variable names to avoid confusion with sensor voltages
+% E_ref_0 = 0;
+% E_ref_1 = E_ref_0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
+% E_ref_2 = E_ref_1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
+% 
+% % Initialize output
+% U_ref = zeros(size(E_ref));
+% 
+% % Segment 1: E_ref_0 to E_ref_1 (U0 to U1)
+% mask1 = (E_ref >= E_ref_0) & (E_ref < E_ref_1);
+% U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E_ref_0);
+% 
+% % Segment 2: E_ref_1 to E_ref_2 (U1 to U2)
+% mask2 = (E_ref >= E_ref_1) & (E_ref < E_ref_2);
+% U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E_ref_1);
+% 
+% % Segment 3: E_ref_2 and above (U2 to U3)
+% mask3 = (E_ref >= E_ref_2);
+% U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E_ref_1);
+% 
+% % Handle very low voltages
+% U_ref(E_ref < E_ref_0) = cal_ref.U0;
+% % % end
+% % U_ref = A * E_ref^B;
+%% Temperature Correction (Dantec manual 8.1.2: Ecorr = ((Tw-T0)/(Tw-Ta))^0.5 * Ea)
+apply_T_correction = false; % Set to false to skip (only valid if overheat ratio was re-adjusted at acquisition time)
 
-% First, we need to calculate the voltage breakpoints from velocity breakpoints
-% Rearranging: E = E_i + ((U - U_i)/G_i)^2
-
-% Calculate voltage breakpoints (working backwards from velocity breakpoints)
-% Use different variable names to avoid confusion with sensor voltages
-E_ref_0 = 0;
-E_ref_1 = E_ref_0 + ((cal_ref.U1 - cal_ref.U0) / cal_ref.G1)^2;
-E_ref_2 = E_ref_1 + ((cal_ref.U2 - cal_ref.U1) / cal_ref.G2)^2;
-
-% Initialize output
-U_ref = zeros(size(E_ref));
-
-% Segment 1: E_ref_0 to E_ref_1 (U0 to U1)
-mask1 = (E_ref >= E_ref_0) & (E_ref < E_ref_1);
-U_ref(mask1) = cal_ref.U0 + cal_ref.G1 * sqrt(E_ref(mask1) - E_ref_0);
-
-% Segment 2: E_ref_1 to E_ref_2 (U1 to U2)
-mask2 = (E_ref >= E_ref_1) & (E_ref < E_ref_2);
-U_ref(mask2) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask2) - E_ref_1);
-
-% Segment 3: E_ref_2 and above (U2 to U3)
-mask3 = (E_ref >= E_ref_2);
-U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E_ref_1);
-
-% Handle very low voltages
-U_ref(E_ref < E_ref_0) = cal_ref.U0;
-% % end
-% U_ref = A * E_ref^B;
-%% Temperature Correction (Optional - set to false if not needed)
-apply_T_correction = false; % Set to true if Temperature varies
+OVERHEAT_RATIO = 0.8;      % a  -- overheat ratio used for this probe
+TCR_ALPHA      = 0.46/100; % alpha, 1/degC -- from probe library (TCR, alfa, [%/deg.C])
 
 if apply_T_correction
-    T_w = 200 + cal.T_ref; % Assuming 200°C overheat
+    T_w = 20 + OVERHEAT_RATIO / TCR_ALPHA; % Tw = 20degC + a/alpha = 193.9 (R20 referenced to 20degC)
     E1_corr = E1 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
     E2_corr = E2 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
     E3_corr = E3 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
@@ -114,12 +118,31 @@ else
 end
 
 %% Linearization: Convert voltages to calibration velocities
+% In-range: 4th-order polynomial fit from the velocity calibration.
+% Below the lowest calibration point the polynomial diverges (extrapolation
+% instability -> large negative values), so below E_floor we use a straight
+% line from the origin through the first calibration point, matching what
+% StreamWare reports for sub-range (< ~0.5 m/s) samples.
+U_floor = cal.U_floor;   % m/s, per-sensor min calibration velocity (from parse_calibration)
+E_floor = cal.E_floor;   % V,   per-sensor min calibration voltage (from parse_calibration)
+
+% Sensor 1
 Ucal1 = cal.C0_1 + cal.C1_1*E1_corr + cal.C2_1*E1_corr.^2 + ...
         cal.C3_1*E1_corr.^3 + cal.C4_1*E1_corr.^4;
+below1 = E1_corr < E_floor(1);
+Ucal1(below1) = (U_floor(1) / E_floor(1)) * E1_corr(below1);
+
+% Sensor 2
 Ucal2 = cal.C0_2 + cal.C1_2*E2_corr + cal.C2_2*E2_corr.^2 + ...
         cal.C3_2*E2_corr.^3 + cal.C4_2*E2_corr.^4;
+below2 = E2_corr < E_floor(2);
+Ucal2(below2) = (U_floor(2) / E_floor(2)) * E2_corr(below2);
+
+% Sensor 3
 Ucal3 = cal.C0_3 + cal.C1_3*E3_corr + cal.C2_3*E3_corr.^2 + ...
         cal.C3_3*E3_corr.^3 + cal.C4_3*E3_corr.^4;
+below3 = E3_corr < E_floor(3);
+Ucal3(below3) = (U_floor(3) / E_floor(3)) * E3_corr(below3);
 %% Terature 
 
 %% Decomposition into velocities in the wire-coordinate system (U1, U2, U3)
@@ -139,9 +162,9 @@ U2_sq = zeros(size(Ucal2));
 U3_sq = zeros(size(Ucal3));
 
 for i = 1:length(Ucal1)
-    B = [Ucal1(i)^2 * (1 + cal.k1_sq + cal.h1_sq).^2 * cos_angle^2;
-         Ucal2(i)^2 * (1 + cal.k2_sq + cal.h2_sq).^2 * cos_angle^2;
-         Ucal3(i)^2 * (1 + cal.k3_sq + cal.h3_sq).^2 * cos_angle^2];
+    B = [Ucal1(i)^2 * (1 + cal.k1_sq + cal.h1_sq) * cos_angle^2;
+         Ucal2(i)^2 * (1 + cal.k2_sq + cal.h2_sq) * cos_angle^2;
+         Ucal3(i)^2 * (1 + cal.k3_sq + cal.h3_sq) * cos_angle^2];
     
     U_sq = A \ B;
     U1_sq(i) = max(U_sq(1), 0); % Ensure non-negative
@@ -154,27 +177,29 @@ U2 = sqrt(U2_sq);
 U3 = sqrt(U3_sq);
 
 %% Transform to probe coordinates using transformation matrix
-% % If Mp matrix was found in calibration file, use it
-% if isfield(cal, 'Mp')
-%     velocity_wire = [U1'; U2'; U3'];
-%     velocity_probe = cal.Mp * velocity_wire;
-%     U = velocity_probe(1, :)';
-%     V = velocity_probe(2, :)';
-%     W = velocity_probe(3, :)';
-% else
+% If Mp matrix was found in calibration file, use it (now parsed correctly
+% by parse_calibration.m -- see its Mp regex fix)
+if isfield(cal, 'Mp')
+    % Probe transformation matrix Mp
+    velocity_wire = [U1'; U2'; U3'];
+    velocity_probe = cal.Mp * velocity_wire;
+    U = velocity_probe(1, :)';
+    V = velocity_probe(2, :)';
+    W = velocity_probe(3, :)';
+else
     % Use default transformation (page 31 equations)
     U = U1 * cosd(54.74) + U2 * cosd(54.74) + U3 * cosd(54.74);
     V = -U1 * cosd(45) - U2 * cosd(135) + U3 * cosd(90);
     W = -U1 * cosd(114.09) - U2 * cosd(114.09) - U3 * cosd(35.26);
-% end
+end
 %% Store data
     data_collection(n).U = U;
     data_collection(n).V = V;
     data_collection(n).W = W;
-    data_collection(n).T = T;
-    data_collection(n).U_ref = U_ref;
+    % data_collection(n).T = T;
+    % data_collection(n).U_ref = U_ref;
     data_collection(n).time = time;
-    data_collection(n).E_ref = E_ref;
+    % data_collection(n).E_ref = E_ref;
 end
 
 %% Calculate Statistics
@@ -205,26 +230,26 @@ fprintf('  Tu_w = %.2f%%\n', 100*W_rms/U_mean);
 %% Visualization
 figure;
 for n=length(files):-1:1
-subplot(3,2,1); hold on; plot(data_collection(n).time, data_collection(n).U);
+subplot(3,1,1); hold on; plot(data_collection(n).time, U);
 ylabel('U (m/s)'); title('Streamwise Velocity');
-subplot(3,2,3); hold on; plot(data_collection(n).time, data_collection(n).V);
+subplot(3,1,2); hold on; plot(data_collection(n).time, V);
 ylabel('V (m/s)'); title('Lateral Velocity');
-subplot(3,2,5); hold on; plot(data_collection(n).time, data_collection(n).W);
+subplot(3,1,3); hold on; plot(data_collection(n).time, W);
 ylabel('W (m/s)'); xlabel('Time (s)'); title('Vertical Velocity');
 
-% T
-subplot(3,2,2);hold on;
-plot(data_collection(n).time, data_collection(n).T);
+% % T
+% subplot(3,2,2);hold on;
+% plot(data_collection(n).time, data_collection(n).T);
+% % xlabel('Time [s]');
+% ylabel('T [C]');
+% title('Temperature');
+% 
+% % U_ref
+% subplot(3,2,4);hold on;
+% plot(data_collection(n).time, data_collection(n).E_ref);
 % xlabel('Time [s]');
-ylabel('T [C]');
-title('Temperature');
-
-% U_ref
-subplot(3,2,4);hold on;
-plot(data_collection(n).time, data_collection(n).E_ref);
-xlabel('Time [s]');
-ylabel('U_{ref} [V]');
-title('Reference Velocity');
+% ylabel('U_{ref} [V]');
+% title('Reference Velocity');
 
 end
 %%

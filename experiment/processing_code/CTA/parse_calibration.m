@@ -26,6 +26,17 @@ function cal_data = parse_calibration(filename)
             cal_data.(sprintf('C3_%d', sensor)) = str2double(tokens{4});
             cal_data.(sprintf('C4_%d', sensor)) = str2double(tokens{5});
         end
+
+        % Extract the min calibration point (velocity, voltage) for this sensor.
+        % Used to handle sub-range samples: below this voltage the polynomial
+        % diverges, so callers use a line from the origin through this point.
+        min_pattern = sprintf(['Probe sensor no\\.:\\s*%d[\\s\\S]*?' ...
+                  'Min\\. calibration point[^:]*:\\s*([\\-\\d\\.]+)\\s+([\\-\\d\\.]+)'], sensor);
+        min_tokens = regexp(text, min_pattern, 'tokens', 'once');
+        if ~isempty(min_tokens)
+            cal_data.U_floor(sensor) = str2double(min_tokens{1}); % m/s (calibrator velocity)
+            cal_data.E_floor(sensor) = str2double(min_tokens{2}); % V   (sensor voltage)
+        end
     end
     
     % Extract yaw (k) and pitch (h) constants
@@ -34,8 +45,8 @@ function cal_data = parse_calibration(filename)
     cal_data.k1_sq = str2double(k_numbers{1})^2;
     cal_data.k2_sq = str2double(k_numbers{2})^2;
     cal_data.k3_sq = str2double(k_numbers{3})^2;
-    fprintf('Found k values: %.6f, %.6f, %.6f\n', ...
-        str2double(k_numbers{1}), str2double(k_numbers{2}), str2double(k_numbers{3}));
+    % fprintf('Found k values: %.6f, %.6f, %.6f\n', ...
+    %     str2double(k_numbers{1}), str2double(k_numbers{2}), str2double(k_numbers{3}));
 
     h_line = regexp(text, 'h\s*=\s*(.+)', 'tokens', 'once', 'lineanchors');
     % Extract all numbers from the line
@@ -43,11 +54,11 @@ function cal_data = parse_calibration(filename)
     cal_data.h1_sq = str2double(h_numbers{1})^2;
     cal_data.h2_sq = str2double(h_numbers{2})^2;
     cal_data.h3_sq = str2double(h_numbers{3})^2;
-    fprintf('Found h values: %.6f, %.6f, %.6f\n', ...
-        str2double(h_numbers{1}), str2double(h_numbers{2}), str2double(h_numbers{3}));
+    % fprintf('Found h values: %.6f, %.6f, %.6f\n', ...
+        % str2double(h_numbers{1}), str2double(h_numbers{2}), str2double(h_numbers{3}));
     
     % Extract reference temperature
-    temp_pattern = 'Cal\\. ref\\. temp\\..*?([\\d\\.]+)';
+    temp_pattern = 'Cal\. ref\. temp\..*?([\d\.]+)';
     temp_tokens = regexp(text, temp_pattern, 'tokens', 'once');
     if ~isempty(temp_tokens)
         cal_data.T_ref = str2double(temp_tokens{1});
@@ -56,7 +67,7 @@ function cal_data = parse_calibration(filename)
     end
     
     % Extract probe transformation matrix
-    matrix_pattern = 'Probe transformation matrix Mp\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)\\s*([\\-\\d\\.eE]+)';
+    matrix_pattern = 'Probe transformation matrix Mp\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)\s*([\-\d\.eE]+)';
     matrix_tokens = regexp(text, matrix_pattern, 'tokens', 'once');
     
     if ~isempty(matrix_tokens)

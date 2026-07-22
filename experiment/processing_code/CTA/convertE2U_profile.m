@@ -260,9 +260,11 @@ function [U, V, W, T, U_ref] = process_velocities(E1, E2, E3, E_T, E_ref, ...
     U_ref(mask3) = cal_ref.U1 + cal_ref.G2 * sqrt(E_ref(mask3) - E1_ref);
     U_ref(E_ref < E0) = cal_ref.U0;
     
-    % Temperature correction (optional)
+    % Temperature correction (Dantec manual 8.1.2: Ecorr = ((Tw-T0)/(Tw-Ta))^0.5 * Ea)
     if apply_T_correction
-        T_w = 200 + cal.T_ref;
+        OVERHEAT_RATIO = 0.8;      % a  -- overheat ratio used for this probe
+        TCR_ALPHA      = 0.46/100; % alpha, 1/degC -- from probe library (TCR, alfa, [%/deg.C])
+        T_w = 20 + OVERHEAT_RATIO / TCR_ALPHA; % Tw = 20degC + a/alpha = 193.9 (R20 referenced to 20degC)
         E1_corr = E1 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
         E2_corr = E2 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
         E3_corr = E3 .* sqrt((T_w - cal.T_ref) ./ (T_w - T));
@@ -273,12 +275,27 @@ function [U, V, W, T, U_ref] = process_velocities(E1, E2, E3, E_T, E_ref, ...
     end
     
     % Linearization
+    % In-range: 4th-order polynomial fit. Below the lowest calibration point
+    % the polynomial diverges, so below E_floor use a straight line from the
+    % origin through the first calibration point (matches StreamWare for
+    % sub-range < ~0.5 m/s samples).
+    U_floor = cal.U_floor;   % m/s, per-sensor min calibration velocity (from parse_calibration)
+    E_floor = cal.E_floor;   % V,   per-sensor min calibration voltage (from parse_calibration)
+
     Ucal1 = cal.C0_1 + cal.C1_1*E1_corr + cal.C2_1*E1_corr.^2 + ...
             cal.C3_1*E1_corr.^3 + cal.C4_1*E1_corr.^4;
+    below1 = E1_corr < E_floor(1);
+    Ucal1(below1) = (U_floor(1) / E_floor(1)) * E1_corr(below1);
+
     Ucal2 = cal.C0_2 + cal.C1_2*E2_corr + cal.C2_2*E2_corr.^2 + ...
             cal.C3_2*E2_corr.^3 + cal.C4_2*E2_corr.^4;
+    below2 = E2_corr < E_floor(2);
+    Ucal2(below2) = (U_floor(2) / E_floor(2)) * E2_corr(below2);
+
     Ucal3 = cal.C0_3 + cal.C1_3*E3_corr + cal.C2_3*E3_corr.^2 + ...
             cal.C3_3*E3_corr.^3 + cal.C4_3*E3_corr.^4;
+    below3 = E3_corr < E_floor(3);
+    Ucal3(below3) = (U_floor(3) / E_floor(3)) * E3_corr(below3);
     
     % Decomposition into wire velocities
     cos_angle = cosd(35.3);
@@ -291,9 +308,9 @@ function [U, V, W, T, U_ref] = process_velocities(E1, E2, E3, E_T, E_ref, ...
     U3_sq = zeros(size(Ucal3));
     
     for i = 1:length(Ucal1)
-        B = [Ucal1(i)^2 * (1 + cal.k1_sq + cal.h1_sq).^2 * cos_angle^2;
-             Ucal2(i)^2 * (1 + cal.k2_sq + cal.h2_sq).^2 * cos_angle^2;
-             Ucal3(i)^2 * (1 + cal.k3_sq + cal.h3_sq).^2 * cos_angle^2];
+        B = [Ucal1(i)^2 * (1 + cal.k1_sq + cal.h1_sq) * cos_angle^2;
+             Ucal2(i)^2 * (1 + cal.k2_sq + cal.h2_sq) * cos_angle^2;
+             Ucal3(i)^2 * (1 + cal.k3_sq + cal.h3_sq) * cos_angle^2];
         
         U_sq = A \ B;
         U1_sq(i) = max(U_sq(1), 0);
