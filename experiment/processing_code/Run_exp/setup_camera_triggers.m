@@ -34,16 +34,11 @@ function d = setup_camera_triggers(devID, camConfig)
         ch = addoutput(d, devID, cfg.ctr, "PulseGeneration");
         ch.Frequency = cfg.freq;
 
-        if isprop(ch, 'PulseWidth')
-            pulseWidth = cfg.dutyCycle / cfg.freq;   % seconds
-            ch.PulseWidth = pulseWidth;
-            fprintf('%s configured on %s: %.1f Hz, PulseWidth = %.1f us\n', ...
-                cfg.name, cfg.ctr, cfg.freq, pulseWidth * 1e6);
-        else
-            ch.DutyCycle = cfg.dutyCycle;
-            fprintf('%s configured on %s: %.1f Hz, DutyCycle = %.4f (PulseWidth property not found)\n', ...
-                cfg.name, cfg.ctr, cfg.freq, cfg.dutyCycle);
-        end
+        ch.DutyCycle = cfg.dutyCycle;
+
+        fprintf('%s configured on %s: %.1f Hz, exposure %.0f us (duty %.4f), idle %s\n', ...
+            cfg.name, cfg.ctr, cfg.freq, (cfg.dutyCycle / cfg.freq) * 1e6, ...
+            cfg.dutyCycle, string(ch.IdleState));
 
         if cfg.delay ~= 0
             ch.InitialDelay = cfg.delay;   % <-- NOT VERIFIED, see header
