@@ -6,6 +6,12 @@ clear; clc;
 
 %% ---- Config ----
 here = fileparts(mfilename('fullpath'));
+addpath(here);   % so read_calib_frame / calib_target_params are on path
+
+% Board geometry, same single source of truth as calibrate_intrinsic.m
+% and the SVG cut file - do not hardcode square/corner counts here.
+target = calib_target_params('coarse');
+
 cfg.intrinsics_path     = fullfile(here, 'intrinsics.mat');
 cfg.extrinsic_path      = fullfile(here, '..', 'extrinsic.mat');   % swap to .ats in prod
 cfg.extrinsic_frame_idx = 1;
@@ -13,8 +19,6 @@ cfg.corners_csv         = fullfile(here, '..', 'corners.csv');
 cfg.out_dir             = here;
 cfg.image_size          = [512 640];
 cfg.grid_spacing_mm     = 50;   % overlay grid spacing for verification
-
-addpath(here);
 
 %% ---- Load intrinsics ----
 S = load(cfg.intrinsics_path, 'cameraParams');
@@ -35,6 +39,21 @@ if size(imagePoints,1) ~= expected || any(isnan(imagePoints(:)))
 end
 fprintf('Detected %d corners (board %dx%d squares)\n', ...
     size(imagePoints,1), boardSize(1), boardSize(2));
+
+% Cross-check against the physical target definition, not just internal
+% self-consistency. Catches a stale corners.csv (wrong board) even when
+% detection itself succeeds cleanly.
+if ~isequal(sort(boardSize), sort([target.n_cols, target.n_rows]))
+    warning(['Detected board is %dx%d squares but calib_target_params(''coarse'') ' ...
+        'expects %dx%d. corners.csv or the physical target may be stale.'], ...
+        boardSize(1), boardSize(2), target.n_cols, target.n_rows);
+end
+if size(imagePoints,1) ~= target.n_corners
+    warning(['Detected %d corners but the coarse target defines %d. ' ...
+        'Re-run make_synthetic_calib_data.m (or regenerate corners.csv) ' ...
+        'so it matches the current calib_target_params.m.'], ...
+        size(imagePoints,1), target.n_corners);
+end
 
 %% ---- Undistort (mandatory before fitgeotrans) ----
 undistortedPoints = undistortPoints(imagePoints, cameraParams);

@@ -8,19 +8,29 @@
 clear; clc;
 
 %% ---- Config ----
+here = fileparts(mfilename('fullpath'));
+addpath(here);   % so read_calib_frame / calib_target_params are on path
+
+% Board geometry comes from calib_target_params.m, NOT hardcoded here -
+% that is the single source of truth shared with the SVG cut file and
+% corners.csv. If you change the physical target, this picks it up
+% automatically; nothing below needs editing.
+target = calib_target_params('coarse');
+
 cfg.pixel_pitch_mm            = 0.025;
 cfg.nominal_focal_mm          = 13;
-cfg.checker_inner_corners     = [7 5];   % [cols, rows]
-cfg.checker_square_size_mm    = 30;
+cfg.checker_inner_corners     = [target.inner_cols, target.inner_rows];  % [cols, rows]
+cfg.checker_square_size_mm    = target.square_mm;
 cfg.reproj_error_threshold_px = 1.0;
+cfg.num_radial_coeffs         = 3;   % visible fisheye-like bending in real
+                                      % frames - the 2-coeff Brown-Conrady
+                                      % truncation under-fits strong barrel
+                                      % distortion at the periphery
 
-here = fileparts(mfilename('fullpath'));
 cfg.intrinsic_path        = fullfile(here, '..', 'intrinsic.mat');   % swap to .ats in prod
 cfg.intrinsic_frame_indices = 1:25;     % manual per-pose indices; edit for real data
 cfg.out_dir               = here;
 cfg.image_size            = [512 640];
-
-addpath(here);   % so read_calib_frame is on path if run elsewhere
 
 %% ---- Load + normalize frames ----
 N = numel(cfg.intrinsic_frame_indices);
@@ -63,7 +73,7 @@ fprintf('Running estimateCameraParameters (first pass)...\n');
     imagePoints, worldPoints, ...
     'ImageSize', cfg.image_size, ...
     'EstimateSkew', false, ...
-    'NumRadialDistortionCoefficients', 2, ...
+    'NumRadialDistortionCoefficients', cfg.num_radial_coeffs, ...
     'EstimateTangentialDistortion', false);
 
 per_image_err = cameraParams.ReprojectionErrors;   % [Npts x 2 x Nimg]
@@ -89,7 +99,7 @@ else
         imagePoints(:,:,keep), worldPoints, ...
         'ImageSize', cfg.image_size, ...
         'EstimateSkew', false, ...
-        'NumRadialDistortionCoefficients', 2, ...
+        'NumRadialDistortionCoefficients', cfg.num_radial_coeffs, ...
         'EstimateTangentialDistortion', false);
     fprintf('Mean error: %.3f px -> %.3f px\n', err_before, cameraParams.MeanReprojectionError);
 end
@@ -106,8 +116,42 @@ fprintf('Focal length: fx=%.3f px (%.3f mm)  fy=%.3f px (%.3f mm)  (nominal %d m
     fl_px(1), fl_mm(1), fl_px(2), fl_mm(2), cfg.nominal_focal_mm);
 fprintf('Principal point: (%.2f, %.2f) px; offset from center: (%+.2f, %+.2f) px\n', ...
     pp_px(1), pp_px(2), pp_off(1), pp_off(2));
-fprintf('Radial distortion: [%.5f %.5f]\n', k_rad(1), k_rad(2));
+fprintf('Radial distortion: [%s]\n', sprintf('%.5f ', k_rad));
 fprintf('Mean reprojection error: %.3f px\n', cameraParams.MeanReprojectionError);
+
+%% ---- Radial residual check ----
+% A flat radial-error profile means the distortion model fits well
+% everywhere. A profile that climbs with radius means the model is
+% under-fitting the periphery - i.e. cfg.num_radial_coeffs is still too
+% low for how strong the real (fisheye-like) distortion is, and points
+% near the image edge should not yet be trusted.
+imgPts_used  = imagePoints(:, :, keep);
+reprojPts    = cameraParams.ReprojectedPoints;
+errs_xy      = imgPts_used - reprojPts;
+errs_px      = sqrt(sum(errs_xy.^2, 2));                    % [Npts x 1 x Nimg]
+center       = (cfg.image_size([2 1]) + 1) / 2;
+radius_px    = sqrt(sum((imgPts_used - reshape(center,1,2)).^2, 2));
+
+radius_flat  = radius_px(:);
+err_flat     = errs_px(:);
+max_radius   = sqrt(sum((cfg.image_size([2 1]) / 2).^2));
+edge_bins    = [0 0.5 0.75 1.0] * max_radius;
+fprintf('\nRadial residual check (want roughly flat across bins):\n');
+for b = 1:numel(edge_bins)-1
+    in_bin = radius_flat >= edge_bins(b) & radius_flat < edge_bins(b+1);
+    if any(in_bin)
+        fprintf('  r in [%5.1f, %5.1f) px: mean err %.3f px  (n=%d)\n', ...
+            edge_bins(b), edge_bins(b+1), mean(err_flat(in_bin)), sum(in_bin));
+    end
+end
+outer = radius_flat >= edge_bins(1);
+inner = radius_flat < edge_bins(2);
+if mean(err_flat(~inner)) > 2 * mean(err_flat(inner))
+    warning(['Edge reprojection error is >2x the center error even with ' ...
+        '%d radial coefficients. The pinhole+Brown-Conrady model is ' ...
+        'likely inadequate for this lens - consider estimateFisheyeParameters ' ...
+        '/ the fisheyeParameters workflow instead.'], cfg.num_radial_coeffs);
+end
 
 %% ---- Visualize ----
 figure('Name','Reprojection errors');
