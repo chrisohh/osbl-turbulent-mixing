@@ -1,7 +1,8 @@
-function piv_frame_browser(ii)
-% piv_frame_browser  PIVlab-style frame browser for longitudinal PIV.
+function piv_frame_browser(exp_arg)
+% piv_frame_browser  PIVlab-style frame browser for PIV experiments.
 %
-%   piv_frame_browser(ii)  — experiment index ii (default 4).
+%   piv_frame_browser(ii)             — longitudinal experiment index ii (default 4).
+%   piv_frame_browser('ExpLCTB_2_01') — any experiment name; resolved via get_piv_params.
 %
 %   Left panel : raw PIV image.  Flip A/B [space], draggable IW box,
 %                displacement calculator (pixel coords A/B).
@@ -18,15 +19,12 @@ function piv_frame_browser(ii)
 %   Navigation: slider, Prev/Next, frame edit box, left/right arrow keys.
 %   Image data cached per frame.  Velocity cached per frame+pyramid+overlap.
 
-if nargin < 1 || isempty(ii), ii = 4; end
+if nargin < 1 || isempty(exp_arg), exp_arg = 4; end
 
 %% ------------------------------------------------------------------------
 %% Config
 %% ------------------------------------------------------------------------
-cfg.LONG     = 'D:\DelawareDataBackup\Longitudinal\PIV\';
 cfg.rootpath = 'D:\Scripps';
-cfg.DX = 1/17697.69;
-cfg.DT = 10e-3;
 cfg.IntrWndw      = [256 128 64 32 16 8];   % assumed square pyramid for precomputed display
 cfg.num_of_digits = 3;
 cfg.clim_u = [-0.01, 0.12];
@@ -40,12 +38,28 @@ addpath(strcat(cfg.rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
 addpath(strcat(cfg.rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
 addpath(strcat(cfg.rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
-DIRS = dir(cfg.LONG); DIRS = DIRS(3:end);
-assert(ii >= 1 && ii <= numel(DIRS), 'ii=%d out of range (1..%d)', ii, numel(DIRS));
-cfg.exp_name  = DIRS(ii).name;
-cfg.load_path = [cfg.LONG cfg.exp_name];
+if ischar(exp_arg) || isstring(exp_arg)
+    p = get_piv_params(char(exp_arg));
+    cfg.exp_name       = p.exp_name;
+    cfg.load_path      = p.load_path;
+    cfg.DX             = p.DX;
+    cfg.DT             = p.DT;
+    cfg.piv_folder     = p.piv_folder;
+    cfg.pivsurf_folder = p.pivsurf_folder;
+else
+    ii = exp_arg;
+    LONG               = 'D:\DelawareDataBackup\Longitudinal\PIV\';
+    cfg.DX             = 1/17697.69;
+    cfg.DT             = 10e-3;
+    cfg.piv_folder     = 'PIV';
+    cfg.pivsurf_folder = 'PIVSURF';
+    DIRS = dir(LONG); DIRS = DIRS(3:end);
+    assert(ii >= 1 && ii <= numel(DIRS), 'ii=%d out of range (1..%d)', ii, numel(DIRS));
+    cfg.exp_name  = DIRS(ii).name;
+    cfg.load_path = [LONG cfg.exp_name];
+end
 
-fa   = dir([cfg.load_path filesep 'PIVRaw' filesep 'PIV' filesep ...
+fa   = dir([cfg.load_path filesep 'PIVRaw' filesep cfg.piv_folder filesep ...
             cfg.exp_name '_Piv_*_a.mat']);
 tok  = regexp({fa.name}, '_Piv_(\d+)_a\.mat$', 'tokens', 'once');
 keep = ~cellfun('isempty', tok);
@@ -261,17 +275,17 @@ loadImgAndShowLeft();
         if isKey(S.imageCache, key), imgs = S.imageCache(key); return; end
         pair = pairStr(fnum);
         lp   = cfg.load_path;
-        Aa = load([lp filesep 'PIVRaw' filesep 'PIV' filesep ...
+        Aa = load([lp filesep 'PIVRaw' filesep cfg.piv_folder filesep ...
                    cfg.exp_name '_Piv_' pair '_a.mat']);
-        Bb = load([lp filesep 'PIVRaw' filesep 'PIV' filesep ...
+        Bb = load([lp filesep 'PIVRaw' filesep cfg.piv_folder filesep ...
                    cfg.exp_name '_Piv_' pair '_b.mat']);
         imgs.IM_a = Aa.imgPiv;
         imgs.IM_b = Bb.imgPiv;
         sa = FindSurfaceCapillary( ...
-            [lp filesep 'PIVRaw' filesep 'PIVSURF' filesep ...
+            [lp filesep 'PIVRaw' filesep cfg.pivsurf_folder filesep ...
              cfg.exp_name '_Pivsurf_' pair '_a.mat'], findMask=true);
         sb = FindSurfaceCapillary( ...
-            [lp filesep 'PIVRaw' filesep 'PIVSURF' filesep ...
+            [lp filesep 'PIVRaw' filesep cfg.pivsurf_folder filesep ...
              cfg.exp_name '_Pivsurf_' pair '_b.mat'], findMask=true);
         imgs.surf_a = sa.surfacePIVImg;
         imgs.surf_b = sb.surfacePIVImg;

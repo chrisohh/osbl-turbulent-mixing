@@ -25,8 +25,13 @@ mask_out = double(imSurf.mask);
 mask_out(mask_out == 0) = NaN;   % handle 0/1 input convention
 
 [h, w] = size(mask_out);
-rows    = (1:h)';                          % h×1
-surf    = round(imSurf.surfacePIVImg(:)'); % 1×w
+rows    = (1:h)';                                  % h×1
+% surfacePIVImg can be longer than the mask width (e.g. the transverse
+% calibration's 518:518+2008 crop yields 2009 samples for a 2008-wide
+% mask -- only the first w are ever meaningful, matching how
+% FindSurfaceCapillaryTransverse itself builds .mask).
+surf    = round(imSurf.surfacePIVImg(1:w));        % 1×w
+surf    = surf(:)';
 
 % Set glint band (rows just below the surface) to NaN
 glint_zone = (rows > surf) & (rows <= min(surf + glint_buffer_px, h));

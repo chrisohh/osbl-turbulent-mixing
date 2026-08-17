@@ -9,7 +9,7 @@ clear; clc;
 %% =========================================================================
 %% PARAMETERS
 %% =========================================================================
-p = get_piv_params('ExpLCL_2_01');
+p = get_piv_params('ExpLCTB_2_01');
 
 exp_name  = p.exp_name;
 turb_save = p.turb_save;
@@ -19,7 +19,7 @@ Fs_cam    = p.Fs_cam;       % 14.4 Hz — camera acquisition rate (images)
 Fs_PIV    = p.Fs_PIV;       % 7.2 Hz  — velocity map rate (one pair = two images)
 fps       = Fs_PIV;         % video frame rate matches acquisition
 
-makeVideo = 0;          % rerun video
+makeVideo = 1;          % rerun video
 frame     = 157;        % frame to plot
 
 %% =========================================================================
@@ -34,7 +34,7 @@ fprintf('Experiment: %s   Frames: %d\n', exp_name, N);
 
 if makeVideo == 1
     clearvars vw
-    out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s_rectIntrWndw.mp4', exp_name));
+    out_name = strcat('D:\DelawareDataResult\',sprintf('decomposition_%s.mp4', exp_name));
     vw = VideoWriter(out_name, 'MPEG-4');
     vw.FrameRate = fps;
     open(vw);
@@ -57,9 +57,14 @@ for ff = frame_list
     S      = load(fullfile(turb_save, files(ff).name), 'decomposedVel', 'pivRes');
     cv     = S.decomposedVel.compVel;
     pivRes = S.pivRes;
+    surf   = cv.pf_surf;
 
     x = pivRes.xPIV * DX;   % m
     z = pivRes.zPIV * DX;   % m
+
+    % True surface line in mm (interpolated to PIV x-grid)
+    surf_z = interp1(1:numel(surf), surf, pivRes.xPIV, 'linear', 'extrap') * DX;
+
 
     clf(fig);
     panels = { ...
@@ -74,6 +79,7 @@ for ff = frame_list
         h=imagesc(x, z, panels{k,1});
         set(h, 'AlphaData', ~isnan(panels{k,1}))
         colorbar; colormap(gca, brewermap([],'Spectral'));
+        hold on; plot(x, surf_z, 'k-', 'LineWidth', 1.5);
         xlabel('x (m)'); ylabel('z (m)');
         title(panels{k,2});
         axis equal; axis tight;

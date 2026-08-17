@@ -16,7 +16,7 @@ addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
-p = get_piv_params('ExpLCL_2_01');
+p = get_piv_params('ExpLCL_2_02');
 
 exp_name      = p.exp_name;
 DX            = p.DX;       % 1/17697.69 m/pixel
@@ -28,9 +28,14 @@ SU_OFFSET = 0;     % surface-image → PIV-image pixel offset
 % recompute_piv = true : rerun ComputeVelocities even if PIVMat file exists
 %                        (reuses saved imSurfa/imSurfb, skips FindSurfaceCapillary)
 %               false : use cached compVel if available
-recompute_piv = true;
+recompute_piv = false;
 
-GLINT_BUFFER = 20;   % px below detected surface to exclude (glint/foam band)
+% do_decomposition = false : produce only PIVMat/ (raw velocity + dcor) — enough
+%                            for make_raw_qc_video.m. Skips wave removal entirely.
+%                  true  : also run the setup-specific decomposition -> PIVMat_TURB/
+do_decomposition = true;
+
+GLINT_BUFFER = 20;  %290 for transverse and 20 for longitudinal % px below detected surface to exclude (glint/foam band)
 fprintf('Glint buffer: %d px = %.2f mm\n', GLINT_BUFFER, GLINT_BUFFER * DX * 1e3);
 
 IntrWndw = [128 128;
@@ -53,16 +58,18 @@ val_opts.fill_gaps = true;
 %% =========================================================================
 %% PATHS
 %% =========================================================================
-load_path  = p.load_path;
-piv_save   = p.piv_save;
-turb_save  = p.turb_save;
+load_path      = p.load_path;
+piv_save       = p.piv_save;
+turb_save      = p.turb_save;
+piv_folder     = p.piv_folder;     % 'PIV' (LCL) or 'PIVCC' (transverse)
+pivsurf_folder = p.pivsurf_folder; % 'PIVSURF' (LCL) or 'PIVSURFCC' (transverse)
 if ~exist(piv_save,  'dir'), mkdir(piv_save);  end
 if ~exist(turb_save, 'dir'), mkdir(turb_save); end
 
 %% =========================================================================
 %% LOOP
 %% =========================================================================
-raw_files = dir([load_path '/PIVRaw/PIV/' exp_name '_Piv_*_a.mat']);
+raw_files = dir([load_path '/PIVRaw/' piv_folder '/' exp_name '_Piv_*_a.mat']);
 N_frames  = length(raw_files);
 fprintf('Experiment: %s   Frames: %d\n', exp_name, N_frames);
 
@@ -87,17 +94,32 @@ for ff = 1:N_frames
         imSurfb = tmp.imSurfb;
     end
     if ~cache_hit || recompute_piv
+        is_transverse = ismember(p.setup, {'LCTA', 'LCTB'});
         if ~cache_hit
             fprintf('  computing compVel for pair %s...\n', ps);
-            imSurfa = FindSurfaceCapillary( ...
-                [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_a.mat'], findMask=true);
-            imSurfb = FindSurfaceCapillary( ...
-                [load_path '/PIVRaw/PIVSURF/' exp_name '_Pivsurf_' ps '_b.mat'], findMask=true);
+            if is_transverse
+                % Transverse calibration ported from Main_LC_TRAN2.m -- unverified
+                % against a real frame, see FindSurfaceCapillaryTransverse.m.
+                imSurfa = FindSurfaceCapillaryTransverse( ...
+                    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' ps '_a.mat'], findMask=true);
+                imSurfb = FindSurfaceCapillaryTransverse( ...
+                    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' ps '_b.mat'], findMask=true);
+            else
+                imSurfa = FindSurfaceCapillary( ...
+                    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' ps '_a.mat'], findMask=true);
+                imSurfb = FindSurfaceCapillary( ...
+                    [load_path '/PIVRaw/' pivsurf_folder '/' exp_name '_Pivsurf_' ps '_b.mat'], findMask=true);
+            end
         else
             fprintf('  recomputing PIV for pair %s (reusing saved surfaces)...\n', ps);
         end
-        load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_a.mat']); IMa = imgPiv;
-        load([load_path '/PIVRaw/PIV/' exp_name '_Piv_' ps '_b.mat']); IMb = imgPiv;
+        load([load_path '/PIVRaw/' piv_folder '/' exp_name '_Piv_' ps '_a.mat']); IMa = imgPiv;
+        load([load_path '/PIVRaw/' piv_folder '/' exp_name '_Piv_' ps '_b.mat']); IMb = imgPiv;
+        if is_transverse
+            % Rotate+crop to match the pixel grid FindSurfaceCapillaryTransverse's mask assumes.
+            IMa = RectifyPIVFrameTransverse(IMa);
+            IMb = RectifyPIVFrameTransverse(IMb);
+        end
 
 %         % frame-dependent pyramid
 %         if pair_num <= 210
@@ -122,9 +144,18 @@ for ff = 1:N_frames
     Surface_PIV = imSurfa.surfacePIVImg;
 
     % --- Cartesian velocity: reuse cached u,w if present, else compute ---
-    if isfield(compVel, 'u_raw') && isfield(compVel, 'w_raw') && ~recompute_piv
-        u_raw = compVel.u_raw; w_raw = compVel.w_raw;
+    if isfield(compVel, 'u_raw') && isfield(compVel, 'w_raw') && ...
+       isfield(compVel, 'u_raw_nan') && isfield(compVel, 'w_raw_nan') && ~recompute_piv
+        u_raw     = compVel.u_raw;     w_raw     = compVel.w_raw;
+        u_raw_nan = compVel.u_raw_nan; w_raw_nan = compVel.w_raw_nan;
     else
+        % Snapshot before gap-fill/smoothn: no post-PIV interpolation or smoothing.
+        % NaN preserved at air (Mask) and PIV-gate-failed locations (delta_x already NaN).
+        u_raw_nan = compVel.delta_x .* compVel.Mask .* DX/DT;
+        w_raw_nan = compVel.delta_z .* compVel.Mask .* DX/DT;
+        compVel.u_raw_nan = u_raw_nan;
+        compVel.w_raw_nan = w_raw_nan;
+
         compVel = validatePIV(compVel, val_opts);
         compVel.delta_x = smoothn(compVel.delta_x, 0.1, 'robust');
         compVel.delta_z = smoothn(compVel.delta_z, 0.1, 'robust');
@@ -142,49 +173,38 @@ for ff = 1:N_frames
         save(fullfile(piv_save, [exp_name '_compVel_' ps '.mat']), 'compVel', 'imSurfa', 'imSurfb', '-v7');
     end
 
-    % --- wave-following transform ---
-    pivRes.zPIV = compVel.zPIV; pivRes.xPIV = compVel.xPIV;
-    pivRes.GS   = compVel.GS;   pivRes.mask  = compVel.Mask;
-    transfo     = generateTransfo_LC_noLFV_2023(compVel, Surface_PIV, pivRes);
-    SU          = transfo.SU(2:end,:)   + SU_OFFSET;
-    ORBX        = transfo.ORBX(2:end,:);    % pixels/frame
-    ORBZ        = transfo.ORBZ(2:end,:);
-    ORBX_ms     = ORBX * DX/DT;             % m/s
-    ORBZ_ms     = ORBZ * DX/DT;
-    pivRes.pf_surf = SU(1,:);
-
-    % transform raw velocity to wave-following frame
-    intrp_u_raw = transformVelField_decay_forFab(u_raw, pivRes, SU);   % m/s, wave-following
-    intrp_w_raw = transformVelField_decay_forFab(w_raw, pivRes, SU);
-
-    % subtract orbitals → mean+turb residual in wave-following frame
-    intrp_u_res = intrp_u_raw - ORBX_ms;
-    intrp_w_res = intrp_w_raw - ORBZ_ms;
-
-    % reverse-transform to lab frame
-    u_res_lab  = reverseTransformVelField_decay_forFab(intrp_u_res, pivRes, SU);
-    w_res_lab  = reverseTransformVelField_decay_forFab(intrp_w_res, pivRes, SU);
-    u_orb_lab  = reverseTransformVelField_decay_forFab(ORBX_ms,     pivRes, SU);
-    w_orb_lab  = reverseTransformVelField_decay_forFab(ORBZ_ms,     pivRes, SU);
+    if do_decomposition
+    % --- wave-turbulence decomposition (setup-specific) ---
+    switch p.setup
+        case 'LCL'    % longitudinal: image x-axis is wave-propagation direction
+            [D, pivRes] = decompose_longitudinal(u_raw, w_raw, compVel, Surface_PIV, SU_OFFSET);
+        case {'LCTA', 'LCTB'}   % transverse: cross-wave plane, different physics
+            [D, pivRes] = decompose_transverse(u_raw, w_raw, compVel, Surface_PIV, SU_OFFSET);
+        otherwise
+            error('Unknown setup for decomposition: %s', p.setup);
+    end
 
     % --- build and save decomposedVel to PIVMat_TURB ---
-    decomposedVel.compVel.u_raw        = single(u_raw);        % measured, lab frame
-    decomposedVel.compVel.w_raw        = single(w_raw);
-    decomposedVel.compVel.intrp_u_raw  = single(intrp_u_raw);  % measured, wave-following
-    decomposedVel.compVel.intrp_w_raw  = single(intrp_w_raw);
-    decomposedVel.compVel.ORBX_ms      = single(ORBX_ms);      % orbital, wave-following
-    decomposedVel.compVel.ORBZ_ms      = single(ORBZ_ms);
-    decomposedVel.compVel.intrp_u_res  = single(intrp_u_res);  % mean+turb, wave-following
-    decomposedVel.compVel.intrp_w_res  = single(intrp_w_res);
-    decomposedVel.compVel.u_res_lab    = single(u_res_lab);    % mean+turb, lab frame
-    decomposedVel.compVel.w_res_lab    = single(w_res_lab);
-    decomposedVel.compVel.u_orb_lab    = single(u_orb_lab);    % orbital, lab frame
-    decomposedVel.compVel.w_orb_lab    = single(w_orb_lab);
-    decomposedVel.compVel.SU           = single(SU);
+    decomposedVel.compVel.u_raw        = single(D.u_raw);        % measured, lab frame (gap-filled + smoothed)
+    decomposedVel.compVel.w_raw        = single(D.w_raw);
+    decomposedVel.compVel.u_raw_nan    = single(u_raw_nan);      % raw PIV output, NaN at bad-dcor/air (no gap-fill, no smoothn)
+    decomposedVel.compVel.w_raw_nan    = single(w_raw_nan);
+    decomposedVel.compVel.intrp_u_raw  = single(D.intrp_u_raw);  % measured, wave-following
+    decomposedVel.compVel.intrp_w_raw  = single(D.intrp_w_raw);
+    decomposedVel.compVel.ORBX_ms      = single(D.ORBX_ms);      % orbital, wave-following
+    decomposedVel.compVel.ORBZ_ms      = single(D.ORBZ_ms);
+    decomposedVel.compVel.intrp_u_res  = single(D.intrp_u_res);  % mean+turb, wave-following
+    decomposedVel.compVel.intrp_w_res  = single(D.intrp_w_res);
+    decomposedVel.compVel.u_res_lab    = single(D.u_res_lab);    % mean+turb, lab frame
+    decomposedVel.compVel.w_res_lab    = single(D.w_res_lab);
+    decomposedVel.compVel.u_orb_lab    = single(D.u_orb_lab);    % orbital, lab frame
+    decomposedVel.compVel.w_orb_lab    = single(D.w_orb_lab);
+    decomposedVel.compVel.SU           = single(D.SU);
     decomposedVel.compVel.pf_surf      = Surface_PIV;
     decomposedVel.compVel.dcor         = single(compVel.dcor);  % correlation quality (NaN=air; use dcor<0.4 to mask before Reynolds stresses)
 
     save(fullfile(turb_save, [exp_name '_compVel_' ps '.mat']), 'decomposedVel', 'pivRes');
+    end   % do_decomposition
 
 %     % --- accumulate 2D ensemble average ---
 %     if isempty(ensembleSum_u)

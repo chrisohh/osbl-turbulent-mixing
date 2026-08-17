@@ -27,7 +27,7 @@ setup.dt = dt;
 fprintf('===== CISG PROCESSING SETUP =====\n');
 fprintf('Data folder: %s\n', raw_root);
 fprintf('Frame rate: %d Hz (dt = %.4f s)\n', fs, dt);
-fprintf('Camera height: %.1f cm\n', setup.camera_height);
+% fprintf('Camera height: %.1f cm\n', setup.camera_height);
 fprintf('Water depth: %.1f cm\n', setup.water_depth);
 % fprintf('Pattern size: %.1f x %.1f cm\n\n', setup.pattern_width_cm, setup.pattern_height_cm);
 

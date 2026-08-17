@@ -1,4 +1,39 @@
+<<<<<<< Updated upstream
 load("\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000026_f1268.mat")
+=======
+
+%% Directly read from ats
+% addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release')
+
+% Add the clean Program Files path
+addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release');
+% addpath('C:\Users\airsealab\AppData\Local\Programs\FLIR Systems\sdks\file\bin\Release')
+% Create a FlirMovieReader object
+v = FlirMovieReader('D:\HLAB_2026\IR_camera\Rec-000014.ats');
+v.unit='temperatureFactory';
+%% Extract key metadata
+% Camera and acquisition info
+cameraInfo.model = v.sourceInfo.cameraModel;
+cameraInfo.serial = v.sourceInfo.cameraSerial;
+cameraInfo.lens = v.sourceInfo.lens;
+cameraInfo.width = v.sourceInfo.imageWidth;
+cameraInfo.height = v.sourceInfo.imageHeight;
+cameraInfo.frameRate = v.sourceInfo.presetInfo(1).frameRate;
+cameraInfo.numFrames = v.sourceInfo.presetInfo(1).numFrames;
+cameraInfo.integrationTime = v.sourceInfo.presetInfo(1).intTime;
+
+%% Preallocate 3D matrix for all frames
+numFrames = cameraInfo.numFrames;
+height = cameraInfo.height;
+width = cameraInfo.width;
+
+data = zeros(height, width, numFrames, 'single');
+
+%% Read one frame
+frameToPlot=1268;
+sampleFrame=readFrame(v, frameToPlot);
+data(:,:,frameToPlot)=sampleFrame;
+>>>>>>> Stashed changes
 figure;
 imagesc(Frame)
 
@@ -32,6 +67,24 @@ axis equal tight;
 mask = img_avg < 18.7;
 
 %%
+<<<<<<< Updated upstream
+=======
+img_sum=zeros(size(data(:,:,1)));
+for i = 1:10
+    img_sum = img_sum + data(:,:,i);
+end
+
+% Compute time average
+img_avg = img_sum / 10;
+
+%%
+wallTemp = 17;%18.5;%17.3;  % or whatever temp the walls are at
+maskThresh = wallTemp+0.5;
+f1=data(:,:,frameToPlot);
+mask = f1 < maskThresh;%17.8;
+
+Frame=data(:,:,frameToPlot);
+>>>>>>> Stashed changes
 masked_data=(Frame-img_avg).*mask;
 masked_data(~mask) = NaN;  % Set false regions to NaN
 figure;

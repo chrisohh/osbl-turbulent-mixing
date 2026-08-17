@@ -19,12 +19,12 @@ addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\FabriceScripts\'));
 addpath(strcat(rootpath,'\GC-Wave-Gen\M-Files_FabMarcNovDec2014\CrapperOptimizedFindSurface\'));
 
-p = get_piv_params('ExpLCTB_2_01');
+p = get_piv_params('ExpLCL_2_01');
 
 exp_name          = p.exp_name;
 DX                = p.DX;   % 1/17697.69 m/pixel
 DT                = p.DT;   % 10e-3 s, inter-frame (A→B), for velocity scaling
-image_pair_number = 244;    % sanity-check frame
+image_pair_number = 150;    % sanity-check frame
 
 rerun = 0;                  %rerun PIV? or load compVel?
 
@@ -121,7 +121,7 @@ else
 % Residual displacement at each pass should also satisfy ¼ rule — after deformation removes the bulk, the residual should be < IW/4 at that level
 
 % Each row = one pyramid level: [IW_x, IW_z]
-GLINT_BUFFER = 290;%20 for Longitudinal;   % tune to glint band thickness in pixels
+GLINT_BUFFER = 20;%20 for Longitudinal; %290 for transverse  % tune to glint band thickness in pixels
 fprintf('Glint buffer: %d px = %.2f mm\n', GLINT_BUFFER, GLINT_BUFFER * DX * 1e3);
 Mask_a = apply_glint_buffer(imSurfa, GLINT_BUFFER);
 Mask_b = apply_glint_buffer(imSurfb, GLINT_BUFFER);
@@ -137,8 +137,7 @@ axis tight; axis equal
 title(sprintf('PIV %s frame %s - A', exp_name, pair_str), ...
     'Interpreter', 'none')
 %%
-IntrWndw = [128 128;
-             64 64;    %   shallow z to stay below surface
+IntrWndw = [64 64;    %128 128;   shallow z to stay below surface
              32 32;
              16 16];
 GrdSpc = [IntrWndw(:,1)/2,   IntrWndw(:,2)/2];   % 50% both, all passes
@@ -255,26 +254,21 @@ set(gcf,'color','white')
 % (experiment-specific; from Main_LC.m)
 SU_OFFSET = 0;%-1716 + 287;
 
-pivRes.zPIV = compVel.zPIV;
-pivRes.xPIV = compVel.xPIV;
-pivRes.GS   = compVel.GS;
-pivRes.mask  = compVel.Mask;
+% Method A decomposition — same function the batch loop calls, so this script
+% is a single-frame sanity check of the exact pipeline.
+% (wind drift: opt.U_drift = 0.05; [D,pivRes] = decompose_longitudinal(...,opt);)
+[D, pivRes] = decompose_longitudinal(u_raw, w_raw, compVel, Surface_PIV, SU_OFFSET);
 
-% no drift (default):
-transfo = generateTransfo_LC_noLFV_2023(compVel, Surface_PIV, pivRes);
+% unpack for step-by-step plotting below
+SU          = D.SU;
+ORBX_ms     = D.ORBX_ms;     ORBZ_ms     = D.ORBZ_ms;
+intrp_u_raw = D.intrp_u_raw; intrp_w_raw = D.intrp_w_raw;
+u_res       = D.intrp_u_res; w_res       = D.intrp_w_res;
+u_res_lab   = D.u_res_lab;   w_res_lab   = D.w_res_lab;
+u_orb_lab   = D.u_orb_lab;   w_orb_lab   = D.w_orb_lab;
+u_raw_lab   = D.u_raw_lab;   w_raw_lab   = D.w_raw_lab;
 
-% % with wind drift (e.g. 0.05 m/s):
-% opt.U_drift = 0.05;
-% transfo = generateTransfo_LC_noLFV_2023(compVel, Surface_PIV, pivRes, opt);
-
-SU   = transfo.SU(2:end,:);        % remove zeta=0 row (the surface itself)
-SU   = SU + SU_OFFSET;             % surface-image → PIV-image pixel coords
-ORBX = transfo.ORBX(2:end,:);      % horizontal orbital velocity
-ORBZ = transfo.ORBZ(2:end,:);      % vertical orbital velocity
-
-pivRes.pf_surf = SU(1,:);
-
-fprintf('SU size: %d x %d   ORBX size: %d x %d\n', size(SU), size(ORBX));
+fprintf('SU size: %d x %d   ORBX size: %d x %d\n', size(SU), size(ORBX_ms));
 
 % --- Plot SU grid lines on Cartesian velocity ---
 figure;
@@ -298,10 +292,9 @@ drawnow
 %% =========================================================================
 %% STEP 3 — TRANSFORM VELOCITY TO WAVE-FOLLOWING
 %% =========================================================================
-intrp_u_raw = transformVelField_decay_forFab(u_raw, pivRes, SU);
-intrp_w_raw = transformVelField_decay_forFab(w_raw, pivRes, SU);
+% intrp_u_raw / intrp_w_raw already computed in decompose_longitudinal (Step 2)
 
-% figure out where nan is at the bottom 
+% figure out where nan is at the bottom
 % deepest row where the full width is valid
 last_valid_row = find(all(~isnan(intrp_u_raw), 2), 1, 'last');
 
@@ -334,9 +327,7 @@ drawnow
 %% =========================================================================
 %% STEP 4 — METHOD A ORBITALS
 %% =========================================================================
- % Convert pixel/frame -> m/s
-    ORBX_ms = ORBX * DX / DT;
-    ORBZ_ms = ORBZ * DX / DT;
+ % ORBX_ms / ORBZ_ms already converted to m/s in decompose_longitudinal (Step 2)
 
 figure;
 subplot(1,2,1)
@@ -365,8 +356,7 @@ drawnow
 %% =========================================================================
 %% STEP 5 — SUBTRACT ORBITALS aka RESIDUAL
 %% =========================================================================
-u_res = intrp_u_raw - ORBX_ms;   % mean+turb residual, wave-following
-w_res = intrp_w_raw - ORBZ_ms;
+% u_res / w_res (mean+turb residual, wave-following) from decompose_longitudinal (Step 2)
 
 figure(6); clf;
 subplot(3,2,1)
@@ -432,12 +422,8 @@ xlim([compVel.xPIV(1), compVel.xPIV(end)] * DX)
 set(gcf,'Color','white')
 
 %% Transform wave following frame back to lab frame
-u_res_lab  = reverseTransformVelField_decay_forFab(u_res,       pivRes, SU);
-w_res_lab  = reverseTransformVelField_decay_forFab(w_res,       pivRes, SU);
-u_orb_lab  = reverseTransformVelField_decay_forFab(ORBX_ms,     pivRes, SU);
-w_orb_lab  = reverseTransformVelField_decay_forFab(ORBZ_ms,     pivRes, SU);
-u_raw_lab  = reverseTransformVelField_decay_forFab(intrp_u_raw, pivRes, SU);
-w_raw_lab  = reverseTransformVelField_decay_forFab(intrp_w_raw, pivRes, SU);
+% u_res_lab / w_res_lab / u_orb_lab / w_orb_lab / u_raw_lab / w_raw_lab
+% already computed in decompose_longitudinal (Step 2)
 
 figure(7); clf;
 subplot(3,2,1)
