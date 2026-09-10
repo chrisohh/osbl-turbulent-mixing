@@ -8,13 +8,14 @@
 %
 % ASSUMPTIONS (check these before running):
 %   - USB-6451 (fan/hot-wire) is "Dev4" in NI MAX -- CHANGE if different
-%   - PCI-6621 (camera counters) is "Dev1" in NI MAX -- CHANGE if different
+%   - PCI-6621 (camera counters) is "Dev1" in NI MAX -- CHANGE if differentnn
 %   - Fan on Dev4/ao0, hot-wire on Dev4/ai0:ai2
 %   - Fan ramp: 1.5->8V over 60s, hold 30s, ramp down 5s -- adjust as needed
 %   - Hot-wire: 4 kHz sample rate
-%   - Camera counters: IR/ctr2 (50 Hz, duty arbitrary) + Color/ctr1 (50 Hz,
-%     0.035 duty = 700us pulse width, confirmed requirement) + Mono/ctr3
-%     (50 Hz, 0.25 duty -- confirm this value, currently a placeholder)
+%   - Camera counters, all 50 Hz: IR/ctr2 (duty arbitrary -- IR sets its own
+%     exposure), Color/ctr1 and Mono/ctr3 (0.035 duty = 700us exposure, since
+%     these trigger on HIGH level so pulse width = exposure time)
+%   - ctr3 feeds BOTH the Mono side camera and the Mono under-tank camera
 %
 % NOT verified -- confirm before relying on this:
 %   - Whether start(camD, "continuous") or plain start(camD) is correct for
@@ -33,7 +34,7 @@ FAN_DT      = 0.5;  % seconds, step interval
 
 HOTWIRE_FS       = 1000;   % Hz
 DELAY_BEFORE_TRIG = 10;    % seconds after wind start before starting camera counters
-PRE_WIND_BASELINE_T = 0;   % seconds of zero-flow hot-wire data before the fan starts (0 to skip)
+PRE_WIND_BASELINE_T = 0;   % seconds of zero-flow hot-wire data before the fan startsn (0 to skip)
 
 % Analog input channels on the USB-6451. Hot-wire probes are differential
 % (ai0/ai1/ai2, hardware-paired with ai8/ai9/ai10). RefProbe is the velocity
@@ -53,7 +54,7 @@ allAiConfig = struct( ...
 
 % Valid groups: 'Hotwire', 'RefProbe'. Use {'RefProbe'} for reference only,
 % {'Hotwire'} to skip the reference, or both.
-ENABLED_AI = {'Hotwire', 'RefProbe'};%'Hotwire',
+ENABLED_AI = {'RefProbe'};%'Hotwire','Hotwire', 
 aiConfig   = allAiConfig(ismember({allAiConfig.group}, ENABLED_AI));
 aiNames    = {aiConfig.name};
 aiGroups   = {aiConfig.group};
@@ -65,10 +66,18 @@ if isempty(aiConfig)
 end
 
 DEV_CAMERAS = "Dev3";   % <-- confirm this matches NI MAX for the PCI-6621
-% Color needs a specific 700us trigger pulse width (confirmed) -> at 50 Hz
-% (20000us period), dutyCycle = 700/20000 = 0.035. IR's duty cycle doesn't
-% matter (pulse width not critical for that camera), so 0.5 is an arbitrary
-% default.
+% Pulse width IS the exposure: these cameras are set to trigger on HIGH level,
+% so they expose for as long as the line is high. At 50 Hz (20000us period),
+% dutyCycle = exposure_us / 20000 -- so 0.035 = 700us.
+% IR ignores pulse width (its exposure is set in its own software), so its
+% 0.5 is arbitrary.
+%
+% ctr3 DRIVES TWO CAMERAS: the Mono side camera and the Mono under-tank
+% cross-view camera are wired to the same counter output, so they necessarily
+% share this signal -- same 50 Hz, same 700us exposure. Changing 'Mono' below
+% changes both. To give the under-tank camera its own exposure it would need
+% a separate counter (ctr0 is free) and its own entry here.
+% ctr1 (Color) and ctr2 (IR) each drive a single camera.
 allCamConfig = struct( ...
     'name',      {'IR',   'Color',  'Mono'}, ...
     'ctr',       {'ctr2', 'ctr1', 'ctr3'}, ...
@@ -76,6 +85,7 @@ allCamConfig = struct( ...
     'dutyCycle', {0.5,    0.035, 0.035}, ...
     'delay',     {0,      0,    0});
 
+% 'Mono' here means the ctr3 line, i.e. Mono side + Mono under-tank.
 ENABLED_CAMERAS = {'IR','Color','Mono'};   % <-- edit to trigger only certain cameras, e.g. {'IR'} or {} for none
 camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 
@@ -264,14 +274,16 @@ else
     disp('Hotwire group not enabled -- skipping velocity conversion.');
 end
 
-% Save raw voltages, time bases, converted velocity, and event timings.
+% What gets written if you choose to save (prompt is at the end, after the
+% plots, so you can inspect the run before deciding).
 % hwT_wind is the one to use for analysis: 0 = wind start. aiConfig/aiNames
 % record which channels were actually logged in this run.
-save(sprintf('hotwire_%s.mat', datestr(now,'yyyymmdd_HHMMSS')), ...
-    'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE','E1', 'E2', 'E3','U', 'V', 'W', 'E_ref', ...
-    'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
-    'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
-    'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter');
+saveName = sprintf('hotwire_%s.mat', datestr(now,'yyyymmdd_HHMMSS'));
+saveVars = {'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE', ...
+            'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', ...
+            'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
+            'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
+            'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter'};
 
 disp('Experiment complete.');
 
@@ -344,6 +356,18 @@ if nSub > 0
         title('Reference probe (ai4)');
         grid on;
     end
+end
+
+%% Save (prompted) -- after the plots so the run can be inspected first.
+% Enter defaults to YES: an accidental keypress should not discard a run.
+drawnow;   % make sure the figures are rendered before the prompt blocks
+resp = input(sprintf('\nSave this run to %s? [Y/n]: ', saveName), 's');
+if isempty(resp) || strncmpi(strtrim(resp), 'y', 1)
+    save(saveName, saveVars{:});
+    fprintf('Saved %s\n', saveName);
+else
+    disp('Not saved. All variables are still in the workspace -- to save later, run:');
+    fprintf('  save(saveName, saveVars{:})\n');
 end
 
 
