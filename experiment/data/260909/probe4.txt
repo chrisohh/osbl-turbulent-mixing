@@ -1,0 +1,238 @@
+[FILE HEADER]:
+
+File info.:
+==========
+
+Database ID:         C:\USERS\ASILA\ONEDRIVE\DOCUMENTS\MY MINICTA PROJECTS\PROBE4\PROBE4.CTADB
+Project ID:          My Project
+Raw Data Event Time: 2:36:39 PM
+Raw Data Event Date: 9/14/2026
+Raw Data Event ID:   blow_test
+
+Group no.:         1
+=========
+
+Number of probes selected:    2
+
+Number of positions: 1
+
+Local variables:
+	A	B	C	D	E
+					
+
+Data acquired with:
+A/D board: 	NI DAQmx Supported Device
+
+Size of file header:       372
+Size of user header:       290
+Size of probe info.:       550
+Size of data header:       78
+
+[USER HEADER]:
+Creator:         
+Account/project number:	0
+Log:        
+
+[PROBE HEADER]:
+
+Probe info.:
+===========
+
+Probe name:       55P95
+Cable length [m]   4
+No. of Sensors    3
+Probe type:     Wire/Fiber
+
+Data from library:
+------------------
+
+TCR, alfa, [%/deg.C]:   	0.36	0.36	0.36
+Bridge ratio:         	1:20 (20 ohms)	1:20 (20 ohms)	1:20 (20 ohms)
+Probe transformation matrix Mp
+	0.57735	0.57735	0.57735
+	-0.707107	0.707107	6.12323e-17
+	0.408248	0.408248	-0.816496
+
+Bridge top, ohms:     	0	0	0
+Shape:                	Wire	Wire	Wire
+
+Data from hardware setup:
+------------------------
+
+Bridge:
+Bridge connected:     	Yes	Yes	Yes
+Total resistance [Ohms]:  	0	0	0
+Sensor resistance [Ohms]: 	0	0	0
+Decade resistance [Ohms]: 	0	0	0
+Cable resistance [Ohms]:  	0	0	0
+Overheat ratio, a:    	0	0	0
+Tref [deg.C]:          	0	0	0
+Filter:               	13	13	13
+Gain:                 	8	8	8
+Cable comp.:          	8
+
+Signal Conditioner:
+Lowpass filter:  	300 Hz	300 Hz	300 Hz
+Highpass filter: 	BYPASSED	BYPASSED	BYPASSED
+Signal offset:        	0	0	0
+Signal gain:          	1	1	1
+AC/DC voltage:        	DC	DC	DC
+
+Velocity Calibration:
+--------------------
+
+Cal. ref. temp. [deg.C]:    25.0182
+
+Algorithm:                   Polynomial
+Probe sensor no.:            1
+Order of polynomial:         4
+Min. calibration point (prim.par., Volt)  :  0.489168	1.49934
+Max. calibration point (prim.par., Volt):  19.7249	2.67061
+Coefficients:
+C0: 	-76.6178
+C1: 	163.493
+C2: 	-127.555
+C3: 	42.0316
+C4: 	-4.54376
+C5: 	0
+
+Probe sensor no.:            2
+Order of polynomial:         4
+Min. calibration point (prim.par., Volt)  :  0.489168	1.34423
+Max. calibration point (prim.par., Volt):  19.7249	2.40365
+Coefficients:
+C0: 	-75.569
+C1: 	180.199
+C2: 	-157.185
+C3: 	57.9676
+C4: 	-7.03124
+C5: 	0
+
+Probe sensor no.:            3
+Order of polynomial:         4
+Min. calibration point (prim.par., Volt)  :  0.489168	1.45188
+Max. calibration point (prim.par., Volt):  19.7249	2.56498
+Coefficients:
+C0: 	-76.1484
+C1: 	169.407
+C2: 	-137.908
+C3: 	47.4278
+C4: 	-5.3529
+C5: 	0
+
+
+
+ Coordinate Transformation:
+-----------
+Roll:	0
+Pitch:	0
+R:
+	1	0	0
+	0	1	0
+	0	0	1
+P:
+	1	0	0
+	0	1	0
+	0	0	1
+ Directional Calibration:
+-----------
+Yaw- and Pitch constants (ki,hi):
+	Sensor no.:	0	1	2
+	k =   	2.49156	2.88549	2.74562
+	h =   	0.849031	0.988891	0.90285
+
+Conversion/Reduction:
+--------------------
+Conversion level:       Raw Voltage (float)
+Temperature correction: No
+
+
+[PROBE HEADER]:
+
+Probe info.:
+===========
+
+Probe name:       T29
+Cable length [m]   0
+No. of Sensors    1
+Probe type:    Unknown
+
+Data from library:
+------------------
+
+TCR, alfa, [%/deg.C]:   	0
+Bridge ratio:         	1:20 (20 ohms)
+Bridge top, ohms:     	0
+Shape:                	Film
+
+Data from hardware setup:
+------------------------
+
+Bridge:
+Bridge connected:     	Yes
+Total resistance [Ohms]:  	0
+Sensor resistance [Ohms]: 	0
+Decade resistance [Ohms]: 	0
+Cable resistance [Ohms]:  	0
+Overheat ratio, a:    	0
+Tref [deg.C]:          	0
+Filter:               	0
+Gain:                 	0
+Cable comp.:          	0
+
+Signal Conditioner:
+Lowpass filter:  	300 Hz
+Highpass filter: 	BYPASSED
+Signal offset:        	0
+Signal gain:          	1
+AC/DC voltage:        	DC
+
+Velocity Calibration:
+--------------------
+
+Cal. ref. temp. [deg.C]:    25.7189
+
+Algorithm:                   Polynomial
+Probe sensor no.:            1
+Order of polynomial:         4
+Min. calibration point (prim.par., Volt)  :  0.489507	0.976437
+Max. calibration point (prim.par., Volt):  20.2319	4.0639
+Coefficients:
+C0: 	-3.73723
+C1: 	8.50769
+C2: 	-6.16085
+C3: 	2.05729
+C4: 	-0.172011
+C5: 	0
+
+
+
+Conversion/Reduction:
+--------------------
+Conversion level:       Raw Voltage (float)
+Temperature correction: No
+
+
+[DATA HEADER]:
+
+Position no.:     1
+============
+
+Coordinates (x,y,z,a)
+(mm,mm,mm,deg): 	0	0	0	0
+Local variables:  
+	0	0	0	0	0
+
+Block no.:     1
+---------
+
+Acquisition date:   9/14/2026
+Acquisition time:   2:37:03 P
+Sample freq.,kHz:   1
+No. of samples:     5000
+No. of columns:     5
+
+Data format:        Floating point
+Data type:          StreamWare Pro Raw Data
+Data status:        OK
+
