@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(rm -rf \"/d/Scripps/osbl-turbulent-mixing/experiment/processing_code/PIV/.claude\" && echo \"removed\" && ls -la \"/d/Scripps/osbl-turbulent-mixing/experiment/processing_code/PIV/\" | grep claude)",
-      "Bash(ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/\" 2>/dev/null | head -30; echo \"---\"; ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/FabriceScripts/\" 2>/dev/null | head -30)"
+      "Bash(ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/\" 2>/dev/null | head -30; echo \"---\"; ls \"/d/Scripps/GC-Wave-Gen/M-Files_FabMarcNovDec2014/FabriceScripts/\" 2>/dev/null | head -30)",
+      "Bash(ls \"D:/DelawareDataBackup/Longitudinal/PIV/\" 2>/dev/null | head -20)",
+      "Bash(where matlab *)",
+      "Read(//c/Program Files/MATLAB/**)",
+      "Bash(\"/c/Program Files/MATLAB/R2022a/bin/matlab.exe\" -batch \"msgs = checkcode\\('piv_frame_browser.m','-string'\\); disp\\(msgs\\); disp\\('CHECKCODE DONE'\\);\")",
+      "Read(//d/Scripps/**)",
+      "Read(//d//**)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

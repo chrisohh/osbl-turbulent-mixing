@@ -36,6 +36,7 @@ u_bar = NaN(Nz, N_frames);
 fprintf('Loading %d frames...', N_frames);
 for ff = 1:N_frames
     d = load(fullfile(turb_save, turb_files(ff).name), 'decomposedVel');
+    u_raw(:, ff) = nanmean(double(d.decomposedVel.compVel.intrp_u_res), 2);
     u_bar(:, ff) = nanmean(double(d.decomposedVel.compVel.intrp_u_res), 2);
 end
 fprintf(' done.\n');
@@ -46,6 +47,16 @@ t  = p.t_imaging_wrt_ramp + (0:N_frames-1) * DT_pair;   % s since wind ramp-up (
 % increasing downward. Row i of intrp_u_res is i*GS pixels below the surface.
 GS   = tmp0.pivRes.GS;
 z_ax = (1:Nz) * GS * DX;   % m below surface (ζ)
+
+%% =========================================================================
+%% SELECTED DEPTHS — shared by all plots below
+%% =========================================================================
+depth_mm  = [2, 5, 10, 20, 50];
+depth_idx = arrayfun(@(d) find(min(abs(z_ax*1e3 - d)) == abs(z_ax*1e3 - d), 1), depth_mm);
+depth_idx = depth_idx(depth_idx <= Nz);
+Nd        = numel(depth_idx);
+dlbl      = arrayfun(@(d) sprintf('z \\approx %.1f mm', 1e3*z_ax(min(d, numel(z_ax*1e3)))), ...
+                     depth_idx, 'UniformOutput', false);
 
 %% =========================================================================
 %% HOVMOLLER — raw u_bar
@@ -186,12 +197,6 @@ legend('Location','best')
 %% LINE PLOT — sliding-window averages at selected depths
 %% =========================================================================
 win_lengths_s = DT_pair*[1,2,5,10,20,40];
-depth_mm = [2, 5, 10, 20,50];
-depth_idx = arrayfun(@(d) find(min(abs(z_ax*1e3 - d)) == abs(z_ax*1e3 - d), 1), depth_mm);
-% depth_idx     = [2, 5, 10, 20,50];
-
-depth_idx  = depth_idx(depth_idx <= Nz);
-Nd         = numel(depth_idx);
 Nw         = numel(win_lengths_s);
 win_frames = max(1, round(win_lengths_s / DT_pair));
 
@@ -204,9 +209,6 @@ for iw = 1:Nw
     end
     u_avg{iw} = ua;
 end
-
-dlbl = arrayfun(@(d) sprintf('z \\approx %.1f mm', 1e3*z_ax(min(d, numel(z_ax*1e3)))), ...
-                depth_idx, 'UniformOutput', false);
 
 cmap   = parula(Nw);
 lw_vec = linspace(0.8, 2.5, Nw);

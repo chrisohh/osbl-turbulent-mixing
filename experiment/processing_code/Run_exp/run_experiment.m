@@ -89,8 +89,12 @@ allCamConfig = struct( ...
 ENABLED_CAMERAS = {'IR','Color','Mono'};   % <-- edit to trigger only certain cameras, e.g. {'IR'} or {} for none
 camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 
-CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260721\probe3.txt'; % <-- this probe's cal/header
-CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn
+% probe4.txt holds BOTH probes used below: the tri-axial hot-wire (55P95,
+% read by parse_calibration.m/convert_E2U_fn.m, which take the file's FIRST
+% probe block) and the reference probe (T29, read by parse_probe_section.m
+% by name further down).
+CAL_FILE = 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % <-- this probe's cal/header
+CTA_DIR  = 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn + parse_probe_section
 addpath(CTA_DIR);
 
 %% Set up hot-wire AI task (background acquisition, starts immediately)
@@ -253,10 +257,27 @@ disp('Hot-wire acquisition complete.');
 
 %% Pull out the enabled channels by name (column order follows aiConfig)
 E_ref = [];
+U_ref = [];
 if hasRef
     E_ref = data{:, strcmp(aiNames, 'RefProbe')};
     fprintf('Reference probe: mean %.4f V, range %.4f..%.4f V\n', ...
         mean(E_ref), min(E_ref), max(E_ref));
+
+    % Reference-probe velocity from CAL_FILE's T29 block (parse_probe_section,
+    % in CTA_DIR) instead of the certificate table hardcoded in
+    % convert_Eref2Uref.m -- same cal file as the hot-wire's 55P95 block
+    % above, different probe section. Below the calibrated floor the
+    % polynomial diverges, so those samples fall back to the origin-to-floor
+    % line (extrapolation, not calibration); above the ceiling U_ref is
+    % clamped. Same handling as convert_E2U_fn.m uses for the hot-wire.
+    calRef = parse_probe_section(CAL_FILE, 'T29');
+    U_ref  = polyval(fliplr(calRef.C(1,:)), E_ref);
+    belowRef = E_ref < calRef.E_floor(1);
+    U_ref(belowRef) = (calRef.U_floor(1) / calRef.E_floor(1)) * E_ref(belowRef);
+    aboveRef = E_ref > calRef.E_ceil(1);
+    U_ref(aboveRef) = calRef.U_ceil(1);
+    fprintf('Reference probe (T29): %.3f..%.3f m/s (%.1f%% below floor, %.1f%% above ceiling)\n', ...
+        min(U_ref), max(U_ref), 100*nnz(belowRef)/numel(E_ref), 100*nnz(aboveRef)/numel(E_ref));
 end
 
 %% Convert hot-wire voltages to velocity (same pipeline as convertE2U.m)
@@ -280,7 +301,7 @@ end
 % record which channels were actually logged in this run.
 saveName = sprintf('hotwire_%s.mat', datestr(now,'yyyymmdd_HHMMSS'));
 saveVars = {'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE', ...
-            'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', ...
+            'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', 'U_ref', ...
             'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
             'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
             'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter'};

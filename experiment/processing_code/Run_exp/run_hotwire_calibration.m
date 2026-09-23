@@ -72,7 +72,7 @@ if ~hasRef
 end
 
 %% --- Calibration constants ------------------------------------------------
-CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260721\probe3.txt'; % this probe's cal/header
+CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % this probe's cal/header
 CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';
 addpath(CTA_DIR);
 

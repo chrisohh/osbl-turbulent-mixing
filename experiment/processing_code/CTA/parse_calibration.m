@@ -58,7 +58,9 @@ function cal_data = parse_calibration(filename)
         % str2double(h_numbers{1}), str2double(h_numbers{2}), str2double(h_numbers{3}));
     
     % Extract reference temperature
-    temp_pattern = 'Cal\. ref\. temp\..*?([\d\.]+)';
+    % Skip past the "[deg.C]:" label before grabbing the number -- a lazy .*?
+    % otherwise stops on the dot inside "[deg.C]" and returns NaN.
+    temp_pattern = 'Cal\. ref\. temp\.[^:]*:\s*(-?\d+\.?\d*)';
     temp_tokens = regexp(text, temp_pattern, 'tokens', 'once');
     if ~isempty(temp_tokens)
         cal_data.T_ref = str2double(temp_tokens{1});

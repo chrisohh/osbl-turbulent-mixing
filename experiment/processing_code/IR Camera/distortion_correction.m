@@ -1,6 +1,4 @@
-<<<<<<< Updated upstream
 load("\\Airseaserver28\D\HLAB_2026\IR_camera\Rec-000026_f1268.mat")
-=======
 
 %% Directly read from ats
 % addpath('C:\Program Files\FLIR Systems\sdks\file\bin\Release')
