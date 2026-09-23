@@ -1,4 +1,22 @@
-%% run_hotwire_calibration.m
+%% run_fan_kick_calibration.m
+% Copy of run_hotwire_calibration.m with a KICK-START: after the zero hold the
+% fan gets KICK_V for KICK_T seconds (enough to break it free), then drops to
+% the staircase levels -- which may sit BELOW the 2 V start-up threshold,
+% since a spinning fan keeps turning at a lower voltage than it needs to
+% start. The aim is a smaller 0 -> first-velocity jump at wind start.
+%
+% MODE picks the level list (edit the presets below):
+%   'breakaway' -- no kick, slow climb from below 2 V: where does it START?
+%   'stall'     -- kick, then step DOWN: where does it STOP once spinning?
+%   'cal'       -- kick, drop to the lowest keep-spinning level, step UP:
+%                  the V -> U transfer function under the same start-up as
+%                  the experiment (feed stepTable to fit_fan_transfer.m).
+% In 'stall' the levels are walked in the order listed, but still labelled
+% 'up' in stepTable -- the label means "part of the staircase", not direction.
+%
+% Kick hold is never averaged (its settle is its whole length).
+%
+% ---- original header (run_hotwire_calibration.m) ----
 % Stand-alone in-situ calibration run: drives the fan through a STAIRCASE of
 % voltage levels (up then back down) while logging the hot-wire and/or the
 % reference probe continuously. Each level is held long enough that the flow
@@ -30,34 +48,35 @@ DEV_ID = "Dev4";   % <-- confirm this matches NI MAX for the USB-6451
 % Levels the fan is stepped through on the way UP. The down-leg walks the
 % same levels in reverse, so hysteresis (does 4V on the way down give the
 % same flow as 4V on the way up?) shows up as a split in the E-U curve.
-% Extends hotwire_cal_20260922_234655's 2-8V curve past its 8V ceiling, to
-% cover a 9 or 10 m/s ramp target. 8 V repeated as an overlap check against
-% that earlier run (should reproduce U_ref~8.77 m/s); the S-curve seen in
-% the 2-8V fit (line residuals turn positive above 5V) makes it worth
-% checking whether the flow keeps accelerating or starts to level off up
-% here, not just assuming the line continues.
-FAN_V_LEVELS = [8 8.5 9 9.5];
-INCLUDE_DOWN  = false;
+MODE = 'stall';   % 'breakaway' | 'stall' | 'cal'
+
+KICK_V = 2.3;     % V, start-up pulse (a little above the ~2 V threshold)
+KICK_T = 2;       % s, long enough to see the fan turn; 0 = no kick
+
+switch MODE
+    case 'breakaway'
+        KICK_T = 0;                              % must start from rest
+        FAN_V_LEVELS = 1.5:0.05:2.2;
+    case 'stall'
+        FAN_V_LEVELS = 2.2:-0.05:1.2;            % walked in this (descending) order
+    case 'cal'
+        % Start at the lowest level that kept the fan spinning in 'stall'.
+        FAN_V_LEVELS = [1.6 1.8 2 2.2 2.5 3 3.5 4 5 6 7 8];
+    otherwise
+        error('MODE must be ''breakaway'', ''stall'' or ''cal''.');
+end
+INCLUDE_DOWN   = false;                  % also step back down through the same levels
 SKIP_REPEAT_TOP = true;                 % don't re-hold the top level at the start of the down-leg
 
-STEP_SETTLE_T = 20;   % flow settles in ~18 s -- physical floor, not shortened below
-% Water came out of the fan at 9V (user, 2026-09-23) -- 9 and 9.5V get the
-% minimum usable dwell instead of the standard 30s, to limit time spent at
-% that speed. 8 and 8.5V keep the standard dwell (untested for the same
-% issue, but no report of it below 9V). One scalar per level in FAN_V_LEVELS.
-STEP_DWELL_T_BY_LEVEL = [30 30 10 10];   % s, matches FAN_V_LEVELS = [8 8.5 9 9.5]
-if numel(STEP_DWELL_T_BY_LEVEL) ~= numel(FAN_V_LEVELS)
-    error('STEP_DWELL_T_BY_LEVEL must have one entry per FAN_V_LEVELS.');
-end
-% First step here is 0 -> 8V -- much bigger than any jump in prior runs (the
-% low-voltage calibrations stepped in <=2.3V increments). Ramped instead of
-% instant so the fan isn't hit with a sudden 8V demand from rest. Only
-% matters for that first jump -- the later 0.5V steps ramp fast regardless.
-STEP_TRANSITION_T = 10; % s, ramp time BETWEEN levels (0 = instant step)
+STEP_SETTLE_T  = 20;   % s, discarded after each step change (flow settles in ~18 s)
+STEP_DWELL_T   = 30;   % s, averaged into the calibration point
+STEP_TRANSITION_T = 0; % s, ramp time BETWEEN levels (0 = instant step)
 STEP_TRANSITION_DT = 0.25; % s, sub-step interval used during a transition ramp
 
 PRE_RUN_ZERO_T  = 10;  % s, fan at 0 V before the staircase -- gives the zero-flow point
 POST_RUN_ZERO_T = 5;   % s, fan back at 0 V at the end (recorded, not used in the fit)
+
+HOTWIRE_FS = 4000;   % Hz
 
 %% --- Channel selection ----------------------------------------------------
 % Same group idea as run_experiment.m: Probe1-3 are the three sensors of one
@@ -86,7 +105,6 @@ if ~hasRef
              'not a real E->U calibration.']);
 end
 
-if hasHotwire, HOTWIRE_FS = 4000; else, HOTWIRE_FS = 1000; end   % Hz; ref-only runs need only means
 %% --- Calibration constants ------------------------------------------------
 CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % this probe's cal/header
 CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';
@@ -116,18 +134,24 @@ end
 stepV   = [0, levelsUp, levelsDown, 0];
 stepDir = [{'zero'}, repmat({'up'}, 1, numel(levelsUp)), ...
            repmat({'down'}, 1, numel(levelsDown)), {'zero'}];
-% The two zero holds get their own durations; every staircase level gets
-% settle + its own dwell (down-leg reuses the up-leg dwell per level, mirrored
-% same as levelsDown mirrors levelsUp).
-dwellUp   = STEP_DWELL_T_BY_LEVEL(:)';
-dwellDown = fliplr(dwellUp);
-if SKIP_REPEAT_TOP && INCLUDE_DOWN, dwellDown(1) = []; end
-if ~INCLUDE_DOWN, dwellDown = []; end
-stepHoldT = [PRE_RUN_ZERO_T, STEP_SETTLE_T + [dwellUp, dwellDown], POST_RUN_ZERO_T];
+% The two zero holds get their own durations; every staircase level gets the
+% standard settle+dwell.
+stepHoldT = [PRE_RUN_ZERO_T, ...
+             repmat(STEP_SETTLE_T + STEP_DWELL_T, 1, numel(levelsUp) + numel(levelsDown)), ...
+             POST_RUN_ZERO_T];
 % Averaging window inside each hold: skip the settle, take the rest. For the
 % zero holds the settle is scaled down so a short hold still yields a point.
 stepSettleT = min(STEP_SETTLE_T, 0.5 * stepHoldT);
 stepSettleT(2:end-1) = STEP_SETTLE_T;
+
+% Kick: inserted right after the leading zero hold. Settle = whole hold, so
+% its averaging window is empty and it never becomes a calibration point.
+if KICK_T > 0
+    stepV       = [stepV(1),       KICK_V, stepV(2:end)];
+    stepDir     = [stepDir(1),     {'kick'}, stepDir(2:end)];
+    stepHoldT   = [stepHoldT(1),   KICK_T, stepHoldT(2:end)];
+    stepSettleT = [stepSettleT(1), KICK_T, stepSettleT(2:end)];
+end
 
 nSteps = numel(stepV);
 totalT = sum(stepHoldT) + max(nSteps-1, 0) * STEP_TRANSITION_T;
@@ -233,14 +257,8 @@ end
 if hasRef
     E_ref = data{:, strcmp(aiNames, 'RefProbe')};
     % Same source as run_experiment.m: CAL_FILE's T29 block (parse_probe_section),
-    % NOT convert_Eref2Uref's built-in factory certificate -- the two are
-    % different calibrations of this probe (different cal date/temp, different
-    % fit method) and using one here and the other in run_experiment.m would
-    % put fan_transfer.mat's U on a different scale than the U_ref the real
-    % run actually logs. Below the calibrated floor the polynomial diverges,
-    % so those samples fall back to the origin-to-floor line (extrapolation,
-    % not calibration); above the ceiling U_ref is clamped -- same handling
-    % run_experiment.m and convert_E2U_fn.m use.
+    % NOT convert_Eref2Uref's built-in factory certificate -- see
+    % run_hotwire_calibration.m for why the two must not be mixed.
     calRef = parse_probe_section(CAL_FILE, 'T29');
     U_ref  = polyval(fliplr(calRef.C(1,:)), E_ref);
     belowRef = E_ref < calRef.E_floor(1);
@@ -257,13 +275,6 @@ end
 % One calibration point per hold: mean over [stepStart+settle, stepEnd].
 avgStart = stepStart + stepSettleT;
 avgEnd   = stepEnd;
-% First level: average only its last 20 s (post-processing only; the fan
-% schedule is unchanged).
-% iFirst = find(~ismember(stepDir, {'zero','kick'}), 1);
-% avgStart(iFirst) = max(avgStart(iFirst), avgEnd(iFirst) - 20);
-
-% avgStart = stepStart + stepSettleT;
-% avgEnd   = stepEnd;
 
 nCh = numel(aiNames);
 stepMean = nan(nSteps, nCh);
@@ -391,8 +402,7 @@ set(findobj(gcf, 'Type', 'axes'), 'XLim', xl);
 % 2) The calibration curve itself, up-leg and down-leg drawn separately so
 %    hysteresis is visible rather than averaged away.
 if hasRef
-    figure(25); hold on
-    % figure('Name','Calibration curve');
+    figure('Name','Calibration curve');
     isUp   = strcmp(stepDir(:), 'up')   & stepN > 0;
     isDown = strcmp(stepDir(:), 'down') & stepN > 0;
     isZero = strcmp(stepDir(:), 'zero') & stepN > 0;
@@ -428,13 +438,13 @@ end
 %% --- Save (prompted) ------------------------------------------------------
 % Named hotwire_cal_* so it still matches plot_hotwire_data.m's hotwire_*
 % file filter, and the variable names it expects are all present.
-saveName = sprintf('hotwire_cal_%s.mat', datestr(now,'yyyymmdd_HHMMSS'));
+saveName = sprintf('hotwire_cal_kick_%s_%s.mat', MODE, datestr(now,'yyyymmdd_HHMMSS'));
 saveVars = {'data','hwT','hwT_t0','hwT_wind','CAL_FILE','cal_ref', ...
             'E1','E2','E3','U','V','W','E_ref','U_ref', ...
             'aiConfig','aiNames','aiGroups','sentT','sentV', ...
             'stepV','stepDir','stepStart','stepEnd','avgStart','avgEnd', ...
             'stepMean','stepStd','stepN','stepTable','calFit', ...
-            'FAN_V_LEVELS','STEP_SETTLE_T','STEP_DWELL_T_BY_LEVEL','HOTWIRE_FS', ...
+            'FAN_V_LEVELS','MODE','KICK_V','KICK_T','STEP_SETTLE_T','STEP_DWELL_T','HOTWIRE_FS', ...
             'fanStartElapsed','hwStartElapsed','hwStopElapsed'};
 
 drawnow;

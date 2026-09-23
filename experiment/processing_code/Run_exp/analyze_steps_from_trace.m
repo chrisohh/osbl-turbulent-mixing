@@ -30,15 +30,27 @@ else
     fprintf('Pulled the longest line out of an open figure (%d samples).\n', numel(t));
 end
 
-% Is this voltage or already-converted velocity? The 54T29 tops out at 4.83 V
-% on the certificate, so a trace peaking well above that is m/s, not volts.
+% Is this voltage or already-converted velocity? The T29 block tops out
+% around 4.8 V, so a trace peaking well above that is m/s, not volts.
 if max(y) > 5.2
     U = y;
     fprintf('Trace looks like VELOCITY (max %.2f) -- using as-is.\n', max(y));
 else
-    [U, cal] = convert_Eref2Uref(y);
-    fprintf('Trace looks like VOLTAGE (max %.3f V) -- converted via cert %s.\n', ...
-        max(y), cal.id);
+    % Same source as run_experiment.m (CAL_FILE's T29 block via
+    % parse_probe_section), NOT convert_Eref2Uref's built-in factory
+    % certificate -- see run_hotwire_calibration.m for why the two must
+    % not be mixed. CAL_FILE must be in the workspace (loaded with the run).
+    if ~exist('CAL_FILE','var')
+        error('CAL_FILE not in the workspace -- load the run''s .mat first (it is saved with every run).');
+    end
+    calRef = parse_probe_section(CAL_FILE, 'T29');
+    U  = polyval(fliplr(calRef.C(1,:)), y);
+    belowY = y < calRef.E_floor(1);
+    U(belowY) = (calRef.U_floor(1) / calRef.E_floor(1)) * y(belowY);
+    aboveY = y > calRef.E_ceil(1);
+    U(aboveY) = calRef.U_ceil(1);
+    fprintf('Trace looks like VOLTAGE (max %.3f V) -- converted via T29 block of %s.\n', ...
+        max(y), CAL_FILE);
 end
 
 %% 2. Rebuild the step schedule ---------------------------------------------
@@ -47,6 +59,8 @@ end
 if exist('FAN_V_LEVELS','var'), lv = FAN_V_LEVELS(:)'; else, lv = [0 2.1 4 6 8 8.5 9 9.5]; end
 if exist('PRE_RUN_ZERO_T','var'), pz = PRE_RUN_ZERO_T; else, pz = 10;  end
 if exist('STEP_DWELL_T','var'),   dw = STEP_DWELL_T;   else, dw = 90;  end
+% run_hotwire_calibration holds each level for SETTLE + DWELL, not DWELL alone.
+if exist('STEP_SETTLE_T','var'),  dw = dw + STEP_SETTLE_T; end
 
 stepV = [0, lv];
 bnd   = [0, pz, pz + dw*(1:numel(lv))];

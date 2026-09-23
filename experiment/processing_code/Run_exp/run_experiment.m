@@ -25,11 +25,48 @@ clear; clc;
 
 DEV_ID = "Dev4";   % <-- confirm this matches NI MAX for the USB-6451
 
-FAN_V_START = 1.5;
-FAN_V_END   = 8;
-FAN_RAMPUP_T  = 60;   % seconds, ramp up duration
+% V->U: a straight line fits to <1% RMS of range over 2.1-9.5V, but the
+% residuals are NOT noise -- a real, if mild, S-curve (see build_fan_transfer_
+% combined.m's merged data). So PCHIP (via fan_transfer.mat) is used, not a
+% line -- it tracks that shape instead of averaging over it.
+FAN_V_START = 2.1;   % fan cycles on/off at 2.0-2.01 V -- start clear of that.
+                      % Flow jumps 0 -> U(2.1)~1.85 m/s at wind start; the ramp
+                      % below only covers that -> FAN_V_END's U, not literally 0.
+FAN_V_END   = 9.1;    % U(9.1V) ~= 10.0 m/s (interpolated between 9V->9.91
+                      % and 9.5V->10.35, hotwire_cal_20260923_034304).
+                      % KNOWN RISK: water came out of the fan at 9V (user,
+                      % 2026-09-23) -- this holds AT/ABOVE that voltage for
+                      % part of FAN_HOLD_T (10s at V_END). User chose to
+                      % accept this risk to hit 10 m/s (2026-09-23) rather
+                      % than cap at 8.5V (~9.4 m/s, no water seen). Watch
+                      % for water during FAN_HOLD_T; if it recurs, drop back
+                      % to 8.5V and treat 10 m/s as not achievable with this
+                      % hardware until the water source is fixed.
+FAN_RAMP_LINEAR_U = true;
+FAN_TF_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\Run_exp\fan_transfer.mat';
+% Held at FAN_V_START before the ramp begins climbing, so the 0->U(V_START)
+% jump has time to settle (flow settles in ~18s after a step, same measured
+% value used for STEP_SETTLE_T throughout calibration) before the ramp piles
+% more voltage on top of it. Without this the first ~18-20s of "linear in U"
+% would really be jump-settling dynamics plus ramp command, not a clean climb.
+% DELAY_BEFORE_TRIG (10s) is measured from wind start as before (user,
+% 2026-09-23) -- with the hold below, the cameras now start DURING it,
+% before the ramp itself begins climbing. That's the chosen behavior, not a Ybug.
+% NOTE: 10s is BELOW the ~18-20s settle time this rig actually measured
+% (hotwire_cal_20260923_013607: plateau not reached until ~18-20s). Left as
+% typed rather than silently reverted to 20 -- but the climb below will start
+% from flow that likely hasn't fully settled yet at 10s.
+FAN_V_START_HOLD_T = 2;   % s
+% FAN_RAMPUP_T is the TOTAL time from wind start to reaching FAN_V_END,
+% hold included (user, 2026-09-23) -- so the actual climb only gets
+% FAN_RAMPUP_T - FAN_V_START_HOLD_T seconds. The first FAN_RAMP_EASE_T of
+% that climb eases in from zero slope (matching the flat hold) up to the
+% constant rate used for the rest, instead of jumping straight to full rate
+% -- avoids a kink in acceleration at the hold->ramp transition.
+FAN_RAMP_EASE_T = 5;   % s, see block above the ramp-up loop for the closed form
+FAN_RAMPUP_T  = 70;   % seconds, TOTAL wind-start -> FAN_V_END, hold included
 FAN_RAMPDOWN_T  = 5;   % seconds, ramp up duration
-FAN_HOLD_T  = 10;    % seconds, hold at V_END
+FAN_HOLD_T  = 0;    % seconds, hold at V_END
 FAN_DT      = 0.5;  % seconds, step interval
 
 HOTWIRE_FS       = 1000;   % Hz
@@ -54,7 +91,7 @@ allAiConfig = struct( ...
 
 % Valid groups: 'Hotwire', 'RefProbe'. Use {'RefProbe'} for reference only,
 % {'Hotwire'} to skip the reference, or both.
-ENABLED_AI = {'RefProbe'};%'Hotwire','Hotwire', 
+ENABLED_AI = {'Hotwire'};%'Hotwire','Hotwire', 'RefProbe
 aiConfig   = allAiConfig(ismember({allAiConfig.group}, ENABLED_AI));
 aiNames    = {aiConfig.name};
 aiGroups   = {aiConfig.group};
@@ -93,8 +130,8 @@ camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 % read by parse_calibration.m/convert_E2U_fn.m, which take the file's FIRST
 % probe block) and the reference probe (T29, read by parse_probe_section.m
 % by name further down).
-CAL_FILE = 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % <-- this probe's cal/header
-CTA_DIR  = 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn + parse_probe_section
+CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % <-- this probe's cal/header
+CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn + parse_probe_section
 addpath(CTA_DIR);
 
 %% Set up hot-wire AI task (background acquisition, starts immediately)
@@ -118,6 +155,11 @@ end
 %% Set up fan AO channel
 fanD = daq("ni");
 addoutput(fanD, DEV_ID, "ao0", "Voltage");
+% Force a known starting state -- ao0 holds its LAST commanded voltage
+% between MATLAB sessions, so without this an interrupted or otherwise
+% incomplete previous run could leave the fan spinning at whatever voltage
+% it last had, and this run would silently jump from there instead of 0.
+write(fanD, 0);
 
 %% Run fan ramp (blocking, foreground) while hot-wire logs in background.
 % Cameras must start DELAY_BEFORE_TRIG seconds after t=0 -- since that falls
@@ -146,7 +188,15 @@ if PRE_WIND_BASELINE_T > 0
 end
 
 try
-    nStepsUp = round(FAN_RAMPUP_T / FAN_DT) + 1;
+    % FAN_RAMPUP_T is TOTAL wind-start -> FAN_V_END (hold included), so the
+    % climb itself only gets what's left over.
+    T_climb = FAN_RAMPUP_T - FAN_V_START_HOLD_T;
+    if T_climb <= FAN_RAMP_EASE_T
+        error(['FAN_RAMPUP_T (%.1fs) - FAN_V_START_HOLD_T (%.1fs) = %.1fs of climb, ' ...
+               'which is not longer than FAN_RAMP_EASE_T (%.1fs). Raise FAN_RAMPUP_T ' ...
+               'or shorten the hold/ease.'], FAN_RAMPUP_T, FAN_V_START_HOLD_T, T_climb, FAN_RAMP_EASE_T);
+    end
+    nStepsUp = round(T_climb / FAN_DT) + 1;
     nStepsDown = round(FAN_RAMPDOWN_T / FAN_DT) + 1;
     nHoldSteps = max(round(FAN_HOLD_T / FAN_DT), 1);
 
@@ -155,10 +205,38 @@ try
     % by the next one instead of pushing the whole ramp later. Without this
     % the ~10ms per-step overshoot accumulated to ~2s over the full ramp.
     holdDt    = FAN_HOLD_T / nHoldSteps;
-    holdEndT  = FAN_RAMPUP_T + FAN_HOLD_T;
+    holdEndT  = FAN_RAMPUP_T + FAN_HOLD_T;   % FAN_RAMPUP_T already includes the hold
 
     disp('Ramping up...');
-    rampUpV = linspace(FAN_V_START, FAN_V_END, nStepsUp);
+    if FAN_RAMP_LINEAR_U
+        % Equal velocity increments per step, mapped back to voltage through
+        % the measured steady-state V->U curve. No extrapolation: both ends
+        % must sit inside the calibrated voltage range.
+        tf = load(FAN_TF_FILE, 'fanTF'); tf = tf.fanTF;
+        if FAN_V_START < tf.V(1) || FAN_V_END > tf.V(end)
+            error('Ramp %.2f..%.2f V is outside the fan transfer range %.2f..%.2f V (%s).', ...
+                FAN_V_START, FAN_V_END, tf.V(1), tf.V(end), FAN_TF_FILE);
+        end
+        uEnds = interp1(tf.V, tf.U, [FAN_V_START FAN_V_END], 'pchip');
+        U0 = uEnds(1); U1 = uEnds(2);
+        % Ease-in (0 slope at t=0, matching the flat hold) blended into a
+        % constant rate for the rest of the climb, reaching U1 exactly at
+        % T_climb. Quadratic on [0,Tease]: U=U0 + r*t^2/(2*Tease), value+slope
+        % match the linear piece on [Tease,T_climb]: U=U0+r*Tease/2+r*(t-Tease).
+        % Solving U(T_climb)=U1 for r gives the denominator below.
+        Te = FAN_RAMP_EASE_T;
+        r = (U1 - U0) / (T_climb - Te/2);   % m/s per s, the plateau rate
+        tSteps = linspace(0, T_climb, nStepsUp);
+        rampUpU = nan(size(tSteps));
+        easeMask = tSteps <= Te;
+        rampUpU(easeMask)  = U0 + r * tSteps(easeMask).^2 / (2*Te);
+        rampUpU(~easeMask) = U0 + r*Te/2 + r*(tSteps(~easeMask) - Te);
+        rampUpV = interp1(tf.U, tf.V, rampUpU, 'pchip');
+        fprintf('Ramp linear in U: %.2f -> %.2f m/s over %.1fs climb (%.1fs ease-in), rate %.4f m/s/s (%s)\n', ...
+            U0, U1, T_climb, Te, r, tf.created);
+    else
+        rampUpV = linspace(FAN_V_START, FAN_V_END, nStepsUp);
+    end
 
     % The FIRST fan write is the true "wind start" -- it lands ~0.19 s after
     % t0 because start(hw,...) and setup run first. Anchoring both the ramp
@@ -168,11 +246,17 @@ try
     write(fanD, rampUpV(1));
     fanStartElapsed = toc(t0);
     sentT(end+1) = fanStartElapsed; sentV(end+1) = rampUpV(1); %#ok<SAGROW>
-    camTargetElapsed = fanStartElapsed + DELAY_BEFORE_TRIG;
+    camTargetElapsed = fanStartElapsed + DELAY_BEFORE_TRIG;   % from wind start, unaffected by the hold below
     fprintf('%.2f V\n', rampUpV(1));
 
+    if FAN_V_START_HOLD_T > 0
+        fprintf('Holding at %.2f V for %.1f s (letting the jump settle before ramping)...\n', ...
+            FAN_V_START, FAN_V_START_HOLD_T);
+        [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + FAN_V_START_HOLD_T, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
+    end
+
     for k = 2:nStepsUp
-        [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + (k-1)*FAN_DT, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
+        [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + FAN_V_START_HOLD_T + (k-1)*FAN_DT, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
         v = rampUpV(k);
         write(fanD, v);
         sentT(end+1) = toc(t0); sentV(end+1) = v; %#ok<SAGROW> logged at the write
@@ -188,7 +272,12 @@ try
     end
 
     disp('Ramping down...');
-    rampDownV = linspace(FAN_V_END, FAN_V_START, nStepsDown);
+    % Down to 0V, not just back to FAN_V_START -- the fan should start AND
+    % end the run at 0, not be left spinning at FAN_V_START afterward. Below
+    % ~2.0V nothing sustains flow anyway (dead band), so this last stretch of
+    % the ramp is just as physically discontinuous on the way down as the
+    % 0->FAN_V_START jump was on the way up.
+    rampDownV = linspace(FAN_V_END, 0, nStepsDown);
     for j = 1:nStepsDown
         [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + holdEndT + (j-1)*FAN_DT, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
         v = rampDownV(j);
@@ -197,7 +286,7 @@ try
         fprintf('%.2f V\n', v);
     end
 
-    disp('Fan ramp done.');
+    disp('Fan ramp done -- fan at 0V.');
 catch ME
     disp('Interrupted -- setting fan to 0V.');
     write(fanD, 0);
@@ -260,8 +349,6 @@ E_ref = [];
 U_ref = [];
 if hasRef
     E_ref = data{:, strcmp(aiNames, 'RefProbe')};
-    fprintf('Reference probe: mean %.4f V, range %.4f..%.4f V\n', ...
-        mean(E_ref), min(E_ref), max(E_ref));
 
     % Reference-probe velocity from CAL_FILE's T29 block (parse_probe_section,
     % in CTA_DIR) instead of the certificate table hardcoded in
@@ -342,7 +429,7 @@ plot_experiment_signals('actual', ...
     'TrigT', trigT - fanStartElapsed, 'TrigV', trigV);
 %% Per-channel traces (only for the channels actually logged this run)
 hwT_wind=hwT;
-nSub = 2*double(hasHotwire) + double(hasRef);
+nSub = 2*double(hasHotwire) + 2*double(hasRef);
 if nSub > 0
     figure;
     iSub = 0;
@@ -375,6 +462,15 @@ if nSub > 0
         ylabel('Voltage (V)');
         legend('E_{ref}');
         title('Reference probe (ai4)');
+        grid on;
+
+        iSub = iSub + 1;
+        subplot(nSub,1,iSub)
+        plot(hwT_wind, U_ref, 'LineWidth', 1);
+        xlabel('Time since wind start (s)');
+        ylabel('Velocity (m/s)');
+        legend('U', 'V', 'W');
+        title('Converted velocity (probe coordinates)');
         grid on;
     end
 end
