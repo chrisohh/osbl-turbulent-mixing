@@ -19,14 +19,27 @@ DEV_ID = "Dev4";   % <-- confirm this matches NI MAX for the USB-6451
 
 %% Zero the fan first -- do this before daqreset, which would leave the AO
 %% at its last value rather than driving it low.
-try
-    fanCleanup = daq("ni");
-    addoutput(fanCleanup, DEV_ID, "ao0", "Voltage");
-    write(fanCleanup, 0);
-    disp('Fan output set to 0 V.');
-catch ME
-    fprintf(2, 'Could not zero the fan (%s): %s\n', ME.identifier, ME.message);
-    fprintf(2, 'CHECK THE FAN PHYSICALLY -- it may still be running.\n');
+% The interrupted run's own fanD still holds ao0, so a NEW object can't write
+% to it ("Hardware is reserved") -- go through fanD first when it exists.
+fanZeroed = false;
+if evalin('base', 'exist(''fanD'', ''var'')')
+    try
+        evalin('base', 'write(fanD, 0);');
+        disp('Fan output set to 0 V (via the run''s fanD).');
+        fanZeroed = true;
+    catch
+    end
+end
+if ~fanZeroed
+    try
+        fanCleanup = daq("ni");
+        addoutput(fanCleanup, DEV_ID, "ao0", "Voltage");
+        write(fanCleanup, 0);
+        disp('Fan output set to 0 V.');
+        fanZeroed = true;
+    catch ME
+        fprintf(2, 'Could not zero the fan yet (%s) -- will retry after daqreset.\n', ME.message);
+    end
 end
 
 %% Stop any tasks left running in the base workspace (counters, hot-wire).
@@ -44,4 +57,17 @@ end
 %% Release all DAQ hardware
 daqreset;
 disp('daqreset complete -- all DAQ tasks released.');
+
+% Retry the fan now that nothing holds ao0.
+if ~fanZeroed
+    try
+        fanCleanup = daq("ni");
+        addoutput(fanCleanup, DEV_ID, "ao0", "Voltage");
+        write(fanCleanup, 0);
+        disp('Fan output set to 0 V (after daqreset).');
+    catch ME
+        fprintf(2, 'Could not zero the fan (%s): %s\n', ME.identifier, ME.message);
+        fprintf(2, 'CHECK THE FAN PHYSICALLY -- it may still be running.\n');
+    end
+end
 disp('Camera counters are no longer pulsing; re-run run_experiment.m from the top.');

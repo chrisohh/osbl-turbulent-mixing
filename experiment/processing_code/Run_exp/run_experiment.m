@@ -21,9 +21,18 @@
 %   - Whether start(camD, "continuous") or plain start(camD) is correct for
 %     this DAQ Toolbox version (see test_camera_triggers.m notes)
 
-clear; clc;
+% Batch mode: run_experiment_batch.m calls this script with a BATCH_RUN struct
+% (.name, .overrides) in the workspace -- keep it through the clear. Run by
+% hand, BATCH_RUN is empty and everything behaves as before (prompts etc.).
+if exist('BATCH_RUN', 'var') && isstruct(BATCH_RUN)
+    clearvars -except BATCH_RUN
+else
+    clear; clc;
+    BATCH_RUN = [];
+end
 
 DEV_ID = "Dev4";   % <-- confirm this matches NI MAX for the USB-6451
+RUN_TAG = '';   % <-- optional short label for the saved filename, e.g. 'ease5_hold10'
 
 % V->U: a straight line fits to <1% RMS of range over 2.1-9.5V, but the
 % residuals are NOT noise -- a real, if mild, S-curve (see build_fan_transfer_
@@ -65,13 +74,34 @@ FAN_V_START_HOLD_T = 2;   % s
 % -- avoids a kink in acceleration at the hold->ramp transition.
 FAN_RAMP_EASE_T = 5;   % s, see block above the ramp-up loop for the closed form
 FAN_RAMPUP_T  = 70;   % seconds, TOTAL wind-start -> FAN_V_END, hold included
+% Cut the ramp early (s since wind start) WITHOUT changing its shape or rate:
+% the run is identical to a full one up to this time, then holds/ramps down
+% from the voltage reached. Inf = run the full ramp. Use this (not a lower
+% FAN_V_END) to stop before waves reach the hot-wire -- lowering FAN_V_END
+% alone would slow the whole ramp and change the forcing history.
+FAN_RAMP_STOP_T = Inf;
 FAN_RAMPDOWN_T  = 5;   % seconds, ramp up duration
 FAN_HOLD_T  = 0;    % seconds, hold at V_END
 FAN_DT      = 0.5;  % seconds, step interval
 
-HOTWIRE_FS       = 1000;   % Hz
+HOTWIRE_FS       = 4000;   % Hz
 DELAY_BEFORE_TRIG = 10;    % seconds after wind start before starting camera counters
 PRE_WIND_BASELINE_T = 0;   % seconds of zero-flow hot-wire data before the fan startsn (0 to skip)
+
+% Batch overrides (e.g. FAN_RAMP_STOP_T, PRE_WIND_BASELINE_T) replace the
+% values above for this run only. Only settings defined ABOVE this point can
+% be overridden -- a misspelt name errors instead of being silently ignored.
+if ~isempty(BATCH_RUN) && isfield(BATCH_RUN, 'overrides')
+    ovNames = fieldnames(BATCH_RUN.overrides);
+    for iOv = 1:numel(ovNames)
+        if ~exist(ovNames{iOv}, 'var')
+            error('Batch override "%s" is not a setting defined above this point in run_experiment.m.', ovNames{iOv});
+        end
+        eval([ovNames{iOv} ' = BATCH_RUN.overrides.(ovNames{iOv});']);
+        fprintf('Batch override: %s = %s\n', ovNames{iOv}, mat2str(BATCH_RUN.overrides.(ovNames{iOv})));
+    end
+    clear ovNames iOv
+end
 
 % Analog input channels on the USB-6451. Hot-wire probes are differential
 % (ai0/ai1/ai2, hardware-paired with ai8/ai9/ai10). RefProbe is the velocity
@@ -123,7 +153,7 @@ allCamConfig = struct( ...
     'delay',     {0,      0,    0});
 
 % 'Mono' here means the ctr3 line, i.e. Mono side + Mono under-tank.
-ENABLED_CAMERAS = {'IR','Color','Mono'};   % <-- edit to trigger only certain cameras, e.g. {'IR'} or {} for none
+ENABLED_CAMERAS = {};%{'IR','Color','Mono'};   % <-- edit to trigger only certain cameras, e.g. {'IR'} or {} for none
 camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 
 % probe4.txt holds BOTH probes used below: the tri-axial hot-wire (55P95,
@@ -204,8 +234,7 @@ try
     % pausing a relative duration each iteration), so a slow step is absorbed
     % by the next one instead of pushing the whole ramp later. Without this
     % the ~10ms per-step overshoot accumulated to ~2s over the full ramp.
-    holdDt    = FAN_HOLD_T / nHoldSteps;
-    holdEndT  = FAN_RAMPUP_T + FAN_HOLD_T;   % FAN_RAMPUP_T already includes the hold
+    holdDt    = FAN_HOLD_T / nHoldSteps;   % holdEndT is set after the ramp is built (it depends on FAN_RAMP_STOP_T)
 
     disp('Ramping up...');
     if FAN_RAMP_LINEAR_U
@@ -238,6 +267,25 @@ try
         rampUpV = linspace(FAN_V_START, FAN_V_END, nStepsUp);
     end
 
+    % Early stop: cut the SAME ramp at FAN_RAMP_STOP_T instead of reshaping it,
+    % so everything up to the cut matches a full-length run exactly (same
+    % rate, same forcing history) -- then hold/ramp down from wherever it got.
+    tUp = FAN_V_START_HOLD_T + (0:nStepsUp-1) * FAN_DT;   % wind clock of each step
+    keepUp = tUp <= FAN_RAMP_STOP_T + 1e-9;
+    rampUpV = rampUpV(keepUp);
+    nStepsUp = numel(rampUpV);
+    rampEndT = FAN_V_START_HOLD_T + (nStepsUp-1) * FAN_DT;   % = FAN_RAMPUP_T if not cut
+    V_top = rampUpV(end);
+    holdEndT = rampEndT + FAN_HOLD_T;
+    if rampEndT < FAN_RAMPUP_T
+        if FAN_RAMP_LINEAR_U
+            fprintf('Ramp CUT at t=%.1fs (of %.1fs): stops at %.2f V (~%.2f m/s), same rate as the full ramp.\n', ...
+                rampEndT, FAN_RAMPUP_T, V_top, interp1(tf.V, tf.U, V_top, 'pchip'));
+        else
+            fprintf('Ramp CUT at t=%.1fs (of %.1fs): stops at %.2f V.\n', rampEndT, FAN_RAMPUP_T, V_top);
+        end
+    end
+
     % The FIRST fan write is the true "wind start" -- it lands ~0.19 s after
     % t0 because start(hw,...) and setup run first. Anchoring both the ramp
     % schedule and the camera delay here (instead of t0) makes
@@ -265,10 +313,10 @@ try
         end
     end
 
-    fprintf('Holding at %.1f V...\n', FAN_V_END);
+    fprintf('Holding at %.2f V...\n', V_top);
     for i = 1:nHoldSteps
-        [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + FAN_RAMPUP_T + i*holdDt, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
-        sentT(end+1) = toc(t0); sentV(end+1) = FAN_V_END; %#ok<SAGROW>
+        [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + rampEndT + i*holdDt, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
+        sentT(end+1) = toc(t0); sentV(end+1) = V_top; %#ok<SAGROW>
     end
 
     disp('Ramping down...');
@@ -277,7 +325,7 @@ try
     % ~2.0V nothing sustains flow anyway (dead band), so this last stretch of
     % the ramp is just as physically discontinuous on the way down as the
     % 0->FAN_V_START jump was on the way up.
-    rampDownV = linspace(FAN_V_END, 0, nStepsDown);
+    rampDownV = linspace(V_top, 0, nStepsDown);
     for j = 1:nStepsDown
         [camerasStarted, camStartElapsed] = waitUntilWithCameraCheck(fanStartElapsed + holdEndT + (j-1)*FAN_DT, camerasStarted, camStartElapsed, t0, camTargetElapsed, camD);
         v = rampDownV(j);
@@ -386,12 +434,37 @@ end
 % plots, so you can inspect the run before deciding).
 % hwT_wind is the one to use for analysis: 0 = wind start. aiConfig/aiNames
 % record which channels were actually logged in this run.
-saveName = sprintf('hotwire_%s.mat', datestr(now,'yyyymmdd_HHMMSS'));
+% RUN_TAG makes runs distinguishable by filename alone (e.g. "ease5_hold10")
+% instead of only by timestamp -- set it above with the other config, or
+% leave '' for the old timestamp-only behavior.
+if isempty(RUN_TAG)
+    saveName = sprintf('hotwire_%s.mat', datestr(now,'yyyymmdd_HHMMSS'));
+else
+    saveName = sprintf('hotwire_%s_%s.mat', RUN_TAG, datestr(now,'yyyymmdd_HHMMSS'));
+end
+% Every setting that shapes the run, so a saved file says how it was made
+% (earlier files didn't, and the ramp had to be reverse-engineered from
+% sentV). runConfig.fanTF is a copy of the transfer function actually used,
+% since fan_transfer.mat may be rebuilt later.
+runConfig = struct( ...
+    'RUN_TAG', RUN_TAG, ...
+    'FAN_V_START', FAN_V_START, 'FAN_V_END', FAN_V_END, ...
+    'FAN_RAMP_LINEAR_U', FAN_RAMP_LINEAR_U, 'FAN_TF_FILE', FAN_TF_FILE, ...
+    'FAN_V_START_HOLD_T', FAN_V_START_HOLD_T, 'FAN_RAMP_EASE_T', FAN_RAMP_EASE_T, ...
+    'FAN_RAMPUP_T', FAN_RAMPUP_T, 'FAN_RAMP_STOP_T', FAN_RAMP_STOP_T, ...
+    'FAN_RAMPDOWN_T', FAN_RAMPDOWN_T, 'FAN_HOLD_T', FAN_HOLD_T, 'FAN_DT', FAN_DT, ...
+    'rampEndT', rampEndT, 'V_top', V_top, ...           % where the ramp actually stopped
+    'HOTWIRE_FS', HOTWIRE_FS, 'DELAY_BEFORE_TRIG', DELAY_BEFORE_TRIG, ...
+    'PRE_WIND_BASELINE_T', PRE_WIND_BASELINE_T, ...
+    'ENABLED_AI', {ENABLED_AI}, 'ENABLED_CAMERAS', {ENABLED_CAMERAS}, ...
+    'fanTF', []);
+if FAN_RAMP_LINEAR_U, runConfig.fanTF = tf; end
 saveVars = {'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE', ...
             'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', 'U_ref', ...
             'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
             'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
-            'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter'};
+            'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter', ...
+            'runConfig'};
 
 disp('Experiment complete.');
 
@@ -428,7 +501,9 @@ plot_experiment_signals('actual', ...
     'HotwireT', hwLogicT - fanStartElapsed, 'HotwireV', hwLogicV, ...
     'TrigT', trigT - fanStartElapsed, 'TrigV', trigV);
 %% Per-channel traces (only for the channels actually logged this run)
-hwT_wind=hwT;
+% (No hwT_wind=hwT here: that overwrote the wind clock before the save, so
+% saved files had hwT_wind ~0.1 s off, and it would hide any pre-wind
+% baseline. hwT_wind is already 0 = wind start from the read-back above.)
 nSub = 2*double(hasHotwire) + 2*double(hasRef);
 if nSub > 0
     figure;
@@ -476,9 +551,26 @@ if nSub > 0
 end
 
 %% Save (prompted) -- after the plots so the run can be inspected first.
-% Enter defaults to YES: an accidental keypress should not discard a run.
+% Naming happens HERE, after you've seen the plots -- usually you know what
+% a run was worth calling only once you've looked at it, not before it ran.
+% Blank keeps whatever RUN_TAG produced (timestamp-only if RUN_TAG was '').
+% Enter defaults to YES on the save itself: an accidental keypress should
+% not discard a run.
 drawnow;   % make sure the figures are rendered before the prompt blocks
-resp = input(sprintf('\nSave this run to %s? [Y/n]: ', saveName), 's');
+if ~isempty(BATCH_RUN)
+    % Batch mode (run_experiment_batch.m): no prompts, name comes from the batch.
+    saveName = next_repeat_name(regexprep(strtrim(BATCH_RUN.name), '[^\w-]', '_'));
+    resp = 'y';
+else
+    tagResp = input(sprintf('\nName for this run (blank = keep "%s"): ', saveName), 's');
+    tagResp = strtrim(tagResp);
+    if ~isempty(tagResp)
+        % Repeats get the same typed name -- never overwrite an earlier run
+        % (save() does so silently); they're numbered _r1, _r2, ... instead.
+        saveName = next_repeat_name(regexprep(tagResp, '[^\w-]', '_'));
+    end
+    resp = input(sprintf('Save this run to %s? [Y/n]: ', saveName), 's');
+end
 if isempty(resp) || strncmpi(strtrim(resp), 'y', 1)
     save(saveName, saveVars{:});
     fprintf('Saved %s\n', saveName);
@@ -489,6 +581,32 @@ end
 
 
 %% Local functions
+function name = next_repeat_name(base)
+% Next free repeat file for a run name: base_r1.mat, base_r2.mat, ... in the
+% current folder (where save() writes). A plain base.mat from before this
+% numbering counts as repeat 1, so nothing is ever overwritten.
+% If the name already ends in _r<n> (typed by hand), that number is used as
+% given -- unless that file exists, in which case the next free number is.
+    tok = regexp(base, '^(.*)_r(\d+)$', 'tokens', 'once');
+    if ~isempty(tok)
+        if ~isfile([base '.mat'])
+            name = [base '.mat'];
+            return
+        end
+        fprintf('%s.mat already exists -- using the next free repeat number instead.\n', base);
+        base = tok{1};
+    end
+    used = [];
+    if isfile([base '.mat']), used(end+1) = 1; end
+    d = dir([base '_r*.mat']);
+    for k = 1:numel(d)
+        tok = regexp(d(k).name, ['^' regexptranslate('escape', base) '_r(\d+)\.mat$'], 'tokens', 'once');
+        if ~isempty(tok), used(end+1) = str2double(tok{1}); end %#ok<AGROW>
+    end
+    if isempty(used), n = 1; else, n = max(used) + 1; end
+    name = sprintf('%s_r%d.mat', base, n);
+end
+
 function [started, startElapsed] = waitUntilWithCameraCheck(targetElapsed, started, startElapsed, t0, delay, camD)
 % Wait until toc(t0) reaches targetElapsed, checking the camera-start
 % condition every ~20ms. Waiting to an absolute target (rather than pausing
