@@ -21,10 +21,13 @@ function [img, meta] = lif_load_raw(filename, width, height)
         error('lif_load_raw:missing', 'File not found: %s', filename);
     end
 
+    % Some exports (e.g. CoreView_95 Water_SURF / Water_PIV) prepend a short
+    % header (28 bytes) -- the pixel data is then the LAST width*height*2 bytes.
     expected = width * height * 2;
-    if d.bytes ~= expected
+    hdr = d.bytes - expected;
+    if hdr < 0 || hdr > 1024
         error('lif_load_raw:size', ...
-              '%s is %d bytes; expected %d for %dx%d uint16.', ...
+              '%s is %d bytes; expected %d (+ small header) for %dx%d uint16.', ...
               filename, d.bytes, expected, width, height);
     end
 
@@ -32,6 +35,7 @@ function [img, meta] = lif_load_raw(filename, width, height)
     if fid == -1
         error('lif_load_raw:open', 'Cannot open file: %s', filename);
     end
+    fseek(fid, hdr, 'bof');
     raw = fread(fid, width*height, '*uint16');
     fclose(fid);
 
@@ -39,5 +43,6 @@ function [img, meta] = lif_load_raw(filename, width, height)
     img = double(reshape(raw, width, height).');
 
     meta = struct('width', width, 'height', height, 'bytes', d.bytes, ...
+                  'header_bytes', hdr, ...
                   'bit_depth', 10, 'file', filename);
 end
