@@ -332,7 +332,10 @@ nSub = 3 + double(logTrig);
 ax = gobjects(nSub, 1);
 
 ax(1) = subplot(nSub,1,1);
-stairs(sentT - fanStartElapsed, sentV, 'LineWidth', 1.2);
+% plot (not stairs), as plot_experiment_signals.m draws run_experiment.m's
+% fan -- the AO actually holds each write for FAN_DT, but the fan's inertia
+% smooths the 0.9 V ramp-down steps anyway.
+plot(sentT - fanStartElapsed, sentV, 'LineWidth', 1.2);
 shade_camera(camOnT, camOffT);
 ylabel('Fan (V)'); grid on;
 title('Fan command (magenta = camera triggering)');
@@ -345,9 +348,13 @@ ylabel(sprintf('\\eta (%s)', etaUnit)); title('Wave gauge'); grid on;
 ax(3) = subplot(nSub,1,3);
 % Frequency content through the ramp -- shows the peak moving as the waves grow.
 winS = 4;   % s
-[sS, fS, tS] = spectrogram(detrend(eta), hann(round(winS*FS)), round(winS*FS/2), [], FS);
-imagesc(tS + hwT_wind(1), fS, 10*log10(abs(sS).^2 + eps)); axis xy;
-ylim([0 10]); ylabel('f (Hz)'); title(sprintf('\\eta spectrogram (%g s windows, dB)', winS));
+% 4th output is the one-sided PSD (etaUnit^2/Hz); the first output |s|^2
+% would be raw FFT power with no physical units.
+[~, fS, tS, pS] = spectrogram(detrend(eta), hann(round(winS*FS)), round(winS*FS/2), [], FS);
+imagesc(tS + hwT_wind(1), fS, 10*log10(pS + eps)); axis xy;
+cb = colorbar;
+cb.Label.String = sprintf('10 log_{10} S_\\eta(f)  (dB re 1 %s^2/Hz)', etaUnit);
+ylim([0 10]); ylabel('f (Hz)'); title(sprintf('\\eta spectrogram (%g s windows)', winS));
 shade_camera(camOnT, camOffT);
 
 if logTrig
