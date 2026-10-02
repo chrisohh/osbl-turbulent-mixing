@@ -30,6 +30,11 @@ sc.lens_f_mm   = 35;       % <-- lens focal length (CHECK); only sets D
 hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
+% Hot-wire panel under the images, vertical line at the frame time
+show_hw  = true;
+hw_avg_s = 0.02;           % block average (s); 0.02 = one camera frame
+hw_xlim  = [];             % s since wind start; [] = whole record
+
 downsample = 2;            % every Nth pixel
 
 % Figure (see lif_surf_figure).  At z99 the dye darkens the water by only
@@ -107,7 +112,11 @@ fprintf('z99(x) = %.2f..%.2f cm (mean %.2f) below the surface, %g cm bins; all-x
         min(z99_x), max(z99_x), mean(z99_x, 'omitnan'), zo.bin_cm, z99);
 
 %% ---------------- Plot ----------------
-
+if show_hw
+    fo.hw = lif_hw_series(H, hw_avg_s);
+    fo.hw.xlim = hw_xlim;
+end
+h = lif_surf_figure(x_cm, z_cm, fo);
 set(h.fig, 'Name', sprintf('CoreView_%d %s frame %d', run_num, cam, frame));
 if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
 lif_surf_update(h, L, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta, theta_bar, z99, ...
