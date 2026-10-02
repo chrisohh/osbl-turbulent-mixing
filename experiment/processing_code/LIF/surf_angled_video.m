@@ -2,8 +2,8 @@
 % CoreView 95.  All cameras are triggered together at 50 Hz, so frame n is
 % the same instant in both views.
 %   Left : Water_SURF (longitudinal side view) as recorded, physical axes
-%          from the CoreView 94 plate (util/lif_plate_scale.m), dye front
-%          + surface overlaid (util/lif_dye_front.m).
+%          from the CoreView 94 plate (util/lif_plate_scale.m), surface
+%          (util/lif_dye_front.m) and local z99(x) (util/lif_z99.m) overlaid.
 %   Right: Water_PIV (angled view -- "PIV" is only the camera name), as
 %          recorded, in pixels: the view is oblique, so one uniform scale
 %          would be wrong across the frame.
@@ -41,11 +41,23 @@ dy.smooth_mm      = 1.5;
 dy.surf_window_cm = [4 10];
 dy.surf_gap_cm    = 0.4;
 
+zo.frac          = 0.99;   % z99, see lif_z99 (paper eq. 3.14)
+zo.smooth_mm     = dy.smooth_mm;
+zo.surf_gap_cm   = dy.surf_gap_cm;
+zo.fit_order     = 2;
+zo.fit_margin_cm = 0.5;
+zo.bin_cm        = 1;      % x bin for the local z99(x)
+bg_frame         = 1;      % dye-free Water_SURF frame -> theta = ln(I_bg/I); [] = per-column fit
+
 hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
 downsample = 2;
-clims_L    = [350 600];    % counts
+display_L  = 'theta';      % left: 'theta' = ln(I_bg/I) (faint edge near z99 visible) | 'counts'
+clims_L    = [350 600];    % counts mode
+theta_clims = [0 0.05];    % theta mode, linear
+theta_log  = false;        % true: log colour scale over theta_clims_log
+theta_clims_log = [0.005 0.3];
 clims_R    = [];           % counts; [] = percentiles of the first right frame
 pct_lims   = [1 99.5];
 cmap       = 'bone';
@@ -94,6 +106,16 @@ else
 end
 t_wind = camDelay + (frames - 1) / fs;
 
+zo.bg = [];
+if ~isempty(bg_frame)
+    zo.bg = lif_load_raw(fname(cam_L, bg_frame));
+    zo.bg = zo.bg(1:downsample:end, 1:downsample:end);
+    fprintf('z99 background: %s frame %d (dye-free)\n', cam_L, bg_frame);
+    [z0, z_cm, dy] = lif_surface_datum(zo.bg, z_cm, mmpp*downsample, dy);   % z = 0 at the bg-frame water level
+else
+    warning('No bg_frame: z stays measured from the plate (board centre).');
+end
+
 %% ---------------- Figure (built once, updated per frame) ----------------
 fig = figure('Position', fig_pos, 'Color', 'w', 'Visible', 'off');
 tl  = tiledlayout(fig, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -101,16 +123,26 @@ tl  = tiledlayout(fig, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 axL = nexttile(tl);
 hL  = imagesc(axL, x_cm, z_cm, nan(ny, nx));
 axis(axL, 'image'); set(axL, 'YDir', 'normal');
-colormap(axL, cmap); caxis(axL, clims_L);
-cb = colorbar(axL); cb.Label.String = 'counts';
+cb = colorbar(axL);
+if strcmp(display_L, 'theta')
+    colormap(axL, flipud(feval(cmap, 256)));   % dye dark, as in the raw image
+    if theta_log
+        set(axL, 'ColorScale', 'log'); caxis(axL, theta_clims_log);
+    else
+        caxis(axL, theta_clims);
+    end
+    cb.Label.Interpreter = 'latex'; cb.Label.String = '$\theta = \ln(I_{\rm bg}/I)$';
+else
+    colormap(axL, cmap); caxis(axL, clims_L); cb.Label.String = 'counts';
+end
 hold(axL, 'on');
-hF = plot(axL, x_cm, nan(1, nx), 'r-', 'LineWidth', 1.5);
 hS = plot(axL, x_cm, nan(1, nx), 'c--', 'LineWidth', 1);
+h99 = plot(axL, NaN, NaN, '-', 'Color', [0.3 0.75 1], 'LineWidth', 2);
 hold(axL, 'off');
-legend(axL, {sprintf('dye front (%.0f\\%% recovery)', 100*dy.dye_frac), 'surface'}, ...
+legend(axL, {'surface', '$z_{99}(x)$'}, ...
        'Interpreter', 'latex', 'Location', 'southeast');
 xlabel(axL, '$x$ (cm)', 'Interpreter', 'latex');
-ylabel(axL, '$z$ (cm, from board centre)', 'Interpreter', 'latex');
+ylabel(axL, '$z$ (cm, 0 = frame-1 water level)', 'Interpreter', 'latex');
 title(axL, 'Side view (Water\_SURF): dye deepening', 'Interpreter', 'latex');
 set(axL, 'FontSize', 13, 'FontName', 'times');
 
@@ -134,6 +166,9 @@ cleanupObj = onCleanup(@() close(v));
 
 z_front_all = nan(nFrames, nx);
 z_surf_all  = nan(nFrames, nx);
+z99_all     = nan(nFrames, 1);                   % all-x average, cm below the surface
+z99_x_all   = [];                                % [nFrames x nbin] local z99(x)
+x99_cm      = [];                                % bin centres (cm)
 tic;
 for i = 1:nFrames
     n = frames(i);
@@ -143,11 +178,20 @@ for i = 1:nFrames
         I = lif_load_raw(fL);
         I = I(1:downsample:end, 1:downsample:end);
         [z_front_all(i,:), z_surf_all(i,:)] = lif_dye_front(I, z_cm, mmpp*downsample, dy);
-        set(hL, 'CData', I);
+        [z99_x, jc, z99_all(i), ~, ~, theta_img] = lif_z99(I, z_cm, z_surf_all(i,:), z_front_all(i,:), mmpp*downsample, zo);
+        if isempty(z99_x_all), z99_x_all = nan(nFrames, numel(jc)); x99_cm = x_cm(jc); end
+        z99_x_all(i,:) = z99_x;
+        set(h99, 'XData', x99_cm, 'YData', z_surf_all(i,jc) + z99_x);
+        if strcmp(display_L, 'theta')
+            if theta_log, theta_img = max(theta_img, theta_clims_log(1)); end   % log: clip <= 0
+            set(hL, 'CData', theta_img, 'AlphaData', ~isnan(theta_img));
+        else
+            set(hL, 'CData', I);
+        end
     else
         set(hL, 'CData', nan(ny, nx));
+        set(h99, 'YData', nan(size(get(h99, 'XData'))));
     end
-    set(hF, 'YData', z_front_all(i,:));
     set(hS, 'YData', z_surf_all(i,:));
 
     fR = fname(cam_R, n);
@@ -177,10 +221,12 @@ fprintf('\nWrote %s  (%d frames, %.1f s)\n', out_file, nFrames, toc);
 
 %% ---------------- Save the deepening time series ----------------
 depth_all = z_surf_all - z_front_all;           % [nFrames x nx] cm below surface
+zo = rmfield(zo, 'bg');                         % don't save the background image
+zo.bg_frame = bg_frame;
 [p, b] = fileparts(out_file);
 ts_file = fullfile(p, [b '_front.mat']);
-save(ts_file, 'frames', 't_wind', 'x_cm', 'z_front_all', 'z_surf_all', 'depth_all', ...
-     'mmpp', 'c0', 'downsample', 'dy', 'sc', 'hw_file');
+save(ts_file, 'frames', 't_wind', 'x_cm', 'z_front_all', 'z_surf_all', 'depth_all', 'z99_all', 'z99_x_all', 'x99_cm', ...
+     'mmpp', 'c0', 'downsample', 'dy', 'zo', 'sc', 'hw_file');
 fprintf('Saved dye-front time series to %s\n', ts_file);
 
 %% ---------------- helper ----------------

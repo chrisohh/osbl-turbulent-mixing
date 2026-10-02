@@ -1,8 +1,11 @@
-%% Water_SURF frame with physical scale + dye front, timed against wind start
-% Longitudinal (side) view, CoreView 95.  The image is shown AS RECORDED
-% (no rectification); the checkerboard plate in CoreView 94 (same camera,
-% same mount, 2.5 cm toward the camera) only sets the mm/px scale -- see
-% util/lif_plate_scale.m.  Dye front from util/lif_dye_front.m.
+%% Water_SURF frame: raw | theta | profile, timed against wind start
+% Longitudinal (side) view, CoreView 95.  Images are shown AS RECORDED (no
+% rectification); the checkerboard plate in CoreView 94 (same camera, same
+% mount, 2.5 cm toward the camera) only sets the mm/px scale -- see
+% util/lif_plate_scale.m.  Dye front: util/lif_dye_front.m.  Concentration
+% theta = ln(I_bg/I) and z99 (paper eq. 3.14, local in x): util/lif_z99.m.
+% Figure: util/lif_surf_figure.m + lif_surf_update.m, shared with
+% surf_theta_video.m so the still and the video match.
 %
 % Time: frame n is trigger n of the 50 Hz camera counter, so
 %     t = (camStartElapsed - fanStartElapsed) + (n - 1) / fs
@@ -27,10 +30,19 @@ sc.lens_f_mm   = 35;       % <-- lens focal length (CHECK); only sets D
 hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
-downsample = 2;            % display every Nth pixel
-clims      = [350 600];    % counts; [] = percentiles below
-pct_lims   = [1 99.5];
-cmap       = 'bone';
+downsample = 2;            % every Nth pixel
+
+% Figure (see lif_surf_figure).  At z99 the dye darkens the water by only
+% ~1% (~6 counts), below the ~100-count lighting gradient, so it shows in
+% the theta panel, not the raw one.
+fo.cmap            = 'bone';
+fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
+fo.trans_clims     = [0.75 1.05];
+fo.theta_clims     = [0 0.25];      % theta panel, linear: saturates the core, shows the edge
+fo.theta_log       = false;         % true: log colour scale (core AND edge)
+fo.theta_clims_log = [0.005 0.3];
+fo.profile_xlim    = [-0.01 0.3];
+fo.profile_zlim    = [-15 0];       % cm below the surface
 
 % Dye front (see lif_dye_front)
 dy.dye_frac       = 0.90;  % 0.9 ~ the hand-drawn line; 0.99 = outermost edge
@@ -39,19 +51,38 @@ dy.smooth_mm      = 1.5;
 dy.surf_window_cm = [4 10];
 dy.surf_gap_cm    = 0.4;
 
+% z99 (see lif_z99): level above which 99% of the dye resides (eq. 3.14)
+zo.frac          = 0.99;
+zo.smooth_mm     = dy.smooth_mm;
+zo.surf_gap_cm   = dy.surf_gap_cm;
+zo.fit_order     = 2;      % per-column clear-water fit, used only without bg
+zo.fit_margin_cm = 0.5;    % clear water starts this far below the dye front
+zo.bin_cm        = 1;      % x bin for the local z99(x) (longitudinal view)
+bg_frame         = 1;      % dye-free Water_SURF frame -> theta = ln(I_bg/I); [] = per-column fit
+
 %% ---------------- Scale ----------------
 fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam, ...
                   sprintf('CoreView_%d_%s_%02d.raw', plate_num, cam, plate_frm));
 [mmpp, c0] = lif_plate_scale(fplate, sc);
 
-%% ---------------- Load frame ----------------
-fname = fullfile(raw_root, sprintf('CoreView_%d', run_num), cam, ...
-                 sprintf('CoreView_%d_%s_%04d.raw', run_num, cam, frame));
-I = lif_load_raw(fname);
+%% ---------------- Load frame + background ----------------
+fname = @(n) fullfile(raw_root, sprintf('CoreView_%d', run_num), cam, ...
+                      sprintf('CoreView_%d_%s_%04d.raw', run_num, cam, n));
+I = lif_load_raw(fname(frame));
 I = I(1:downsample:end, 1:downsample:end);
 [ny, nx] = size(I);
 x_cm =  ((1:nx)*downsample - c0(1)) * mmpp / 10;
 z_cm = -((1:ny)*downsample - c0(2)) * mmpp / 10;   % row 1 (top) -> largest z
+
+zo.bg = [];
+if ~isempty(bg_frame)
+    zo.bg = lif_load_raw(fname(bg_frame));
+    zo.bg = zo.bg(1:downsample:end, 1:downsample:end);
+    fprintf('Background: frame %d (dye-free)\n', bg_frame);
+    [z0, z_cm, dy] = lif_surface_datum(zo.bg, z_cm, mmpp*downsample, dy);   % z = 0 at the bg-frame water level
+else
+    warning('No bg_frame: z stays measured from the plate (board centre).');
+end
 
 %% ---------------- Time since wind start ----------------
 H = load(hw_file);
@@ -65,33 +96,19 @@ t_frame = camDelay + (frame - 1) / fs;
 fprintf('Frame %d: t = %.3f s since wind start (cameras started at %.3f s)\n', ...
         frame, t_frame, camDelay);
 
-%% ---------------- Dye front ----------------
+%% ---------------- Dye front + z99 ----------------
 [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, mmpp*downsample, dy);
 depth = z_surf - z_front;
-if isempty(dy.dye_thr)
-    lab = sprintf('dye front (%.0f\\%% recovery)', 100*dy.dye_frac);
-else
-    lab = sprintf('dye front ($<%g$ counts)', dy.dye_thr);
-end
 fprintf('Dye front: depth below surface %.1f cm mean, %.1f..%.1f cm range; threshold %.0f..%.0f counts\n', ...
         mean(depth, 'omitnan'), min(depth), max(depth), min(thr_col), max(thr_col));
 
+[z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, z_surf, z_front, mmpp*downsample, zo);
+fprintf('z99(x) = %.2f..%.2f cm (mean %.2f) below the surface, %g cm bins; all-x average z99 = %.2f cm\n', ...
+        min(z99_x), max(z99_x), mean(z99_x, 'omitnan'), zo.bin_cm, z99);
+
 %% ---------------- Plot ----------------
-figure('Name', sprintf('CoreView_%d %s frame %d', run_num, cam, frame), ...
-       'Position', [60 60 1300 700], 'Color', 'w');
-imagesc(x_cm, z_cm, I);                        % unwarped: image as recorded
-axis image; set(gca, 'YDir', 'normal');
-colormap(gca, cmap);
-if isempty(clims), clims = prctile(I(:), pct_lims); end
-caxis(clims);
-c = colorbar; c.Label.String = 'counts';
-hold on;
-plot(x_cm, z_front, 'r-', 'LineWidth', 1.5);
-plot(x_cm, z_surf, 'c--', 'LineWidth', 1);
-hold off;
-legend({lab, 'surface'}, 'Interpreter', 'latex', 'Location', 'southeast');
-xlabel('$x$ (cm)', 'Interpreter', 'latex');
-ylabel('$z$ (cm, from board centre)', 'Interpreter', 'latex');
-title(sprintf('CoreView %d, Water\\_SURF, frame %d, $t = %.2f$ s since wind start', ...
-      run_num, frame, t_frame), 'Interpreter', 'latex');
-set(gca, 'FontSize', 13, 'FontName', 'times');
+
+set(h.fig, 'Name', sprintf('CoreView_%d %s frame %d', run_num, cam, frame));
+if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
+lif_surf_update(h, L, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta, theta_bar, z99, ...
+    sprintf('CoreView %d, Water\\_SURF, frame %d, $t = %.2f$ s since wind start', run_num, frame, t_frame), t_frame);
