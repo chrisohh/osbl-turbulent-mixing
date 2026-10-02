@@ -64,6 +64,7 @@ zo.fit_order     = 2;      % per-column clear-water fit, used only without bg
 zo.fit_margin_cm = 0.5;    % clear water starts this far below the dye front
 zo.bin_cm        = 1;      % x bin for the local z99(x) (longitudinal view)
 bg_frame         = 1;      % dye-free Water_SURF frame -> theta = ln(I_bg/I); [] = per-column fit
+dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtracted from I and I_bg; [] = none
 
 %% ---------------- Scale ----------------
 fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam, ...
@@ -84,6 +85,12 @@ if ~isempty(bg_frame)
     zo.bg = lif_load_raw(fname(bg_frame));
     zo.bg = zo.bg(1:downsample:end, 1:downsample:end);
     fprintf('Background: frame %d (dye-free)\n', bg_frame);
+    zo.dark = [];
+    if ~isempty(dark_file)
+        zo.dark = lif_load_raw(dark_file);
+        zo.dark = zo.dark(1:downsample:end, 1:downsample:end);
+        fprintf('Dark frame: %s\n', dark_file);
+    end
     [z0, z_cm, dy] = lif_surface_datum(zo.bg, z_cm, mmpp*downsample, dy);   % z = 0 at the bg-frame water level
 else
     warning('No bg_frame: z stays measured from the plate (board centre).');
