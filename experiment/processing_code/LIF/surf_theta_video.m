@@ -29,6 +29,11 @@ sc.lens_f_mm   = 35;       % <-- CHECK
 hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
+% Hot-wire panel under the images, vertical line at the frame time
+show_hw  = true;
+hw_avg_s = 0.02;           % block average (s); 0.02 = one camera frame
+hw_xlim  = [];             % s since wind start; [] = whole record
+
 downsample = 2;
 
 fo.cmap            = 'bone';    % see lif_surf_figure
@@ -103,7 +108,11 @@ end
 t_wind = camDelay + (frames - 1) / fs;
 
 %% ---------------- Figure + writer ----------------
-
+if show_hw
+    fo.hw = lif_hw_series(H, hw_avg_s);
+    fo.hw.xlim = hw_xlim;
+end
+h = lif_surf_figure(x_cm, z_cm, fo);
 
 v = VideoWriter(out_file, 'MPEG-4');
 v.FrameRate = video_fps;
