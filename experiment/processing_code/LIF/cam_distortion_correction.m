@@ -69,8 +69,11 @@ fname = @(n) fullfile(raw_root, sprintf('CoreView_%d', run_num), cam.folder, ...
                       sprintf('CoreView_%d_%s_%04d.raw', run_num, cam.folder, n));
 
 %% ---- 2. Calibrate from the plate ----
-Pl = load_img(cam.plate);
-if recalibrate || ~isfile(cal_path)
+% Plates live on the lab computer only: elsewhere the saved cal_path is
+% used (copy / commit LIF/calibration with the code).
+have_plate = isfile(cam.plate);
+if have_plate, Pl = load_img(cam.plate); end
+if have_plate && (recalibrate || ~isfile(cal_path))
     cal = cam_plate_calibrate(Pl, cal_opts);
     if ~isfolder(fileparts(cal_path)), mkdir(fileparts(cal_path)); end
     save(cal_path, 'cal');
@@ -100,7 +103,8 @@ correct = @(img) mask_out(interp2(double(img), U, V, 'linear', NaN), outside);
 fprintf('Corrected grid %d x %d at %.2f mm (x %.0f..%.0f, y %.0f..%.0f mm)\n', ...
         numel(yg), numel(xg), dx_mm, xg([1 end]), yg([end 1]));
 
-% Check figure
+% Check figure (needs the plate image)
+if have_plate
 figure('Name', ['Plate correction ' cam_name], 'Color', 'w', 'Position', [60 80 1600 650]);
 subplot(1, 2, 1);
 imagesc(Pl); colormap(gca, gray); axis image; hold on;
@@ -117,6 +121,7 @@ imagesc(xg/10, yg/10, correct(Pl)); colormap(gca, gray); axis image; set(gca, 'Y
 hold on; plot(cal.world_points(:,1)/10, cal.world_points(:,2)/10, 'g+', 'MarkerSize', 6);
 xlabel([cam.xlab ' (cm)']); ylabel([cam.ylab ' (cm, board centre)']);
 title(sprintf('Plate corrected (%.2f mm grid), %.4f mm/px at board', dx_mm, cal.mm_per_px_center));
+end
 
 %% ---- 3. Data frame: raw | corrected ----
 I  = load_img(fname(frame));

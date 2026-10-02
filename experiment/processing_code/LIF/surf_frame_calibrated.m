@@ -69,7 +69,8 @@ dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtr
 %% ---------------- Scale ----------------
 fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam, ...
                   sprintf('CoreView_%d_%s_%02d.raw', plate_num, cam, plate_frm));
-[mmpp, c0] = lif_plate_scale(fplate, sc);
+cal_dir = fullfile(fileparts(mfilename('fullpath')), 'calibration');   % caches for the other computer
+[mmpp, c0] = lif_scale_cached(fplate, sc, fullfile(cal_dir, sprintf('scale_%s_Core%d.mat', cam, plate_num)));
 
 %% ---------------- Load frame + background ----------------
 fname = @(n) fullfile(raw_root, sprintf('CoreView_%d', run_num), cam, ...
@@ -97,13 +98,8 @@ else
 end
 
 %% ---------------- Time since wind start ----------------
-H = load(hw_file);
-if isfield(H, 'camStartElapsed') && ~isnan(H.camStartElapsed)
-    camDelay = H.camStartElapsed - H.fanStartElapsed;
-else
-    camDelay = H.runConfig.DELAY_BEFORE_TRIG;
-    warning('No camStartElapsed in %s -- using DELAY_BEFORE_TRIG = %g s.', hw_file, camDelay);
-end
+[~, hw_name] = fileparts(hw_file);
+[camDelay, hw] = lif_hw_cached(hw_file, hw_avg_s, fullfile(cal_dir, ['hwsync_' hw_name '.mat']));
 t_frame = camDelay + (frame - 1) / fs;
 fprintf('Frame %d: t = %.3f s since wind start (cameras started at %.3f s)\n', ...
         frame, t_frame, camDelay);
@@ -120,7 +116,7 @@ fprintf('z99(x) = %.2f..%.2f cm (mean %.2f) below the surface, %g cm bins; all-x
 
 %% ---------------- Plot ----------------
 if show_hw
-    fo.hw = lif_hw_series(H, hw_avg_s);
+    fo.hw = hw;
     fo.hw.xlim = hw_xlim;
 end
 h = lif_surf_figure(x_cm, z_cm, fo);

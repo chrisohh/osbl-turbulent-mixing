@@ -83,7 +83,8 @@ fprintf('%s: %d complete frames (%d..%d); writing %d -> %s\n', ...
 %% ---------------- Scale, axes, background, time ----------------
 fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam, ...
                   sprintf('CoreView_%d_%s_%02d.raw', plate_num, cam, plate_frm));
-[mmpp, c0] = lif_plate_scale(fplate, sc);
+cal_dir = fullfile(fileparts(mfilename('fullpath')), 'calibration');   % caches for the other computer
+[mmpp, c0] = lif_scale_cached(fplate, sc, fullfile(cal_dir, sprintf('scale_%s_Core%d.mat', cam, plate_num)));
 
 ny = 3072/downsample;  nx = 4096/downsample;
 x_cm =  ((1:nx)*downsample - c0(1)) * mmpp / 10;
@@ -105,18 +106,13 @@ else
     warning('No bg_frame: z stays measured from the plate (board centre).');
 end
 
-H = load(hw_file);
-if isfield(H, 'camStartElapsed') && ~isnan(H.camStartElapsed)
-    camDelay = H.camStartElapsed - H.fanStartElapsed;
-else
-    camDelay = H.runConfig.DELAY_BEFORE_TRIG;
-    warning('No camStartElapsed in %s -- using DELAY_BEFORE_TRIG = %g s.', hw_file, camDelay);
-end
+[~, hw_name] = fileparts(hw_file);
+[camDelay, hw] = lif_hw_cached(hw_file, hw_avg_s, fullfile(cal_dir, ['hwsync_' hw_name '.mat']));
 t_wind = camDelay + (frames - 1) / fs;
 
 %% ---------------- Figure + writer ----------------
 if show_hw
-    fo.hw = lif_hw_series(H, hw_avg_s);
+    fo.hw = hw;
     fo.hw.xlim = hw_xlim;
 end
 h = lif_surf_figure(x_cm, z_cm, fo);
