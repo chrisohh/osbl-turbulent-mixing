@@ -14,7 +14,7 @@ clear; close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
-raw_root  = 'D:\HLAB_2026\Core';
+raw_root  = 'C:\Users\Administrator\Downloads\';
 cam       = 'Water_Surf';
 run_num   = 95;     frame     = 1875;
 plate_num = 94;     plate_frm = 1;          % plate files are numbered _01
@@ -27,7 +27,7 @@ sc.offset_mm   = 25;       % plate was this far TOWARD the camera
 sc.n_medium    = 1.33;     % plate in water, viewed through the wall
 sc.lens_f_mm   = 35;       % <-- lens focal length (CHECK); only sets D
 
-hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
+hw_file = 'C:\Users\Administrator\Downloads\hotwire_20260923_113939.mat';
 fs      = 50;
 
 % Hot-wire panel under the images, vertical line at the frame time
