@@ -89,7 +89,8 @@ fprintf('Writing %d frames (%d..%d step %d) -> %s\n', nFrames, frames(1), frames
 %% ---------------- Scale, axes, time ----------------
 fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam_L, ...
                   sprintf('CoreView_%d_%s_%02d.raw', plate_num, cam_L, plate_frm));
-[mmpp, c0] = lif_plate_scale(fplate, sc);
+cal_dir = fullfile(fileparts(mfilename('fullpath')), 'calibration');   % caches for the other computer
+[mmpp, c0] = lif_scale_cached(fplate, sc, fullfile(cal_dir, sprintf('scale_%s_Core%d.mat', cam_L, plate_num)));
 
 ny = 3072/downsample;  nx = 4096/downsample;
 x_cm =  ((1:nx)*downsample - c0(1)) * mmpp / 10;
@@ -97,13 +98,8 @@ z_cm = -((1:ny)*downsample - c0(2)) * mmpp / 10;
 xpx  = (1:nx)*downsample;
 ypx  = (1:ny)*downsample;
 
-H = load(hw_file);
-if isfield(H, 'camStartElapsed') && ~isnan(H.camStartElapsed)
-    camDelay = H.camStartElapsed - H.fanStartElapsed;
-else
-    camDelay = H.runConfig.DELAY_BEFORE_TRIG;
-    warning('No camStartElapsed in %s -- using DELAY_BEFORE_TRIG = %g s.', hw_file, camDelay);
-end
+[~, hw_name] = fileparts(hw_file);
+camDelay = lif_hw_cached(hw_file, 0.02, fullfile(cal_dir, ['hwsync_' hw_name '.mat']));
 t_wind = camDelay + (frames - 1) / fs;
 
 zo.bg = [];
