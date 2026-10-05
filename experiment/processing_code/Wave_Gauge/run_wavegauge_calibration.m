@@ -41,7 +41,7 @@ FS          = 1000;            % Hz
 POINT_SETTLE_T = 3;    % s, recorded but not averaged (surface settling after moving the gauge)
 POINT_AVG_T    = 5;   % s, averaged into the calibration point
 
-HEIGHT_ZERO = 46.5;     % scale reading (cm) at still-water level -- prompted below read at the bottom line instead of where 0 line is
+HEIGHT_ZERO = 47;     % scale reading (cm) at still-water level -- prompted below read at the bottom line instead of where 0 line is
 SIGN_FLIP   = false;    % rel_height = -(h - HEIGHT_ZERO), as in WaveGauge_calibration.m
 POLY_ORDER  = 3;       % cubic, as in WaveGauge_calibration.m
 RAIL_TOL    = 0.05;    % V, points within this of the range limits are flagged as clipped

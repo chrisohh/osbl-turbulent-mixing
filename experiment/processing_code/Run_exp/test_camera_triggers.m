@@ -33,7 +33,7 @@ end
 disp(['Found ' char(DEV_CAMERAS) ' -- proceeding.']);
 
 %% Camera config -- IR and Mono only
-% Color/ctr1 intentionally excluded from this test: its ~700us duty-cycle
+% Color/ctr1 intentionally excluded from this test: its ~500us duty-cycle
 % math has not been confirmed yet, and IR+Mono are being validated on the
 % scope first before adding a third channel.
 camConfig = struct( ...

@@ -22,7 +22,7 @@ function d = setup_camera_triggers(devID, camConfig)
 %
 % Pulse width vs. duty cycle: if the channel exposes a PulseWidth property
 % (seconds), that's used directly -- more precise for cameras like Color
-% that need an exact pulse width (e.g. 700us) regardless of frequency.
+% that need an exact pulse width (e.g. 500us) regardless of frequency.
 % Falls back to DutyCycle (fraction of period) if PulseWidth isn't available
 % in this DAQ Toolbox version. Prints which one was actually used per channel.
 
