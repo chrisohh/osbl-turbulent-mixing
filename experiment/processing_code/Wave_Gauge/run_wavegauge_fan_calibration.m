@@ -17,7 +17,7 @@
 %   - CAM_TRIG_CHAN = "ai3" (or any spare Dev4 input): tee the Dev3/ctr1
 %     trigger into that input. Each frame's rising edge is then found in the
 %     same acquisition as the gauge, to within one sample. FS is raised to
-%     10 kHz so the 700 us pulse spans ~7 samples.
+%     10 kHz so the 500 us pulse spans ~5 samples.
 %
 % This is NOT the gauge's static height calibration: that needs still water
 % and is done by run_wavegauge_calibration.m (fan off). This script LOADS that
@@ -27,15 +27,15 @@
 %   - USB-6451 (fan + gauge) is "Dev4" in NI MAX; fan on Dev4/ao0
 %   - Wave gauge on Dev4/ai7, SingleEnded (as in WaveGauge_receiver.m)
 %   - PCI-6621 (camera counters) is "Dev3"; Color camera on ctr1, 50 Hz,
-%     700 us exposure -- copied from run_experiment.m
+%     500 us exposure (duty 0.025 at 50 Hz), as in run_experiment.m
 %   - Variables fanD / hw / camD use the same names as run_experiment.m, so
 %     Run_exp/cleanup_daq.m zeroes the fan and stops the counters after a
 %     Ctrl-C.
 %
 % NOT verified:
 %   - that the USB-6451 sustains 10 kHz on 2 channels (only needed when
-%     CAM_TRIG_CHAN is set). If it errors, lower FS_TRIG to 5000 (still ~3.5
-%     samples per 700 us pulse).
+%     CAM_TRIG_CHAN is set). If it errors, lower FS_TRIG to 5000 (still ~2.5
+%     samples per 500 us pulse).
 %   - start(camD, "continuous") call signature -- same caveat as run_experiment.m.
 
 clear; clc;
@@ -71,13 +71,15 @@ PRE_WIND_BASELINE_T = 10;  % s of still-water gauge data before the fan starts (
 POST_WIND_LOG_T     = 0;   % s of gauge data after the fan reaches 0 V (waves decaying)
 
 %% --- Camera (nadir Color) -------------------------------------------------
-% Same values as run_experiment.m: pulse width IS the exposure (camera
-% triggers on HIGH level), 0.035 at 50 Hz = 700 us.
+% Pulse width IS the exposure (camera triggers on HIGH level), so the duty
+% cycle below sets it: 0.025 at 50 Hz = 500 us. Every pulse in the train is
+% identical -- the counter never changes width mid-run.
+% (Same value as run_experiment.m. The Mono line, ctr3, stays at 700 us.)
 allCamConfig = struct( ...
     'name',      {'IR',   'Color',  'Mono'}, ...
     'ctr',       {'ctr2', 'ctr1',   'ctr3'}, ...
     'freq',      {50,     50,       50}, ...
-    'dutyCycle', {0.5,    0.035,    0.035}, ...
+    'dutyCycle', {0.5,    0.025,    0.035}, ...   % Color: 0.025/50 Hz = 500 us
     'delay',     {0,      0,        0});
 ENABLED_CAMERAS   = {'Color'};
 DELAY_BEFORE_TRIG = 10;    % s after wind start before the camera starts (as run_experiment.m)
@@ -328,10 +330,18 @@ frameTable = table((1:numel(frameT))', frameT(:), etaAtFrame(:), ...
 
 %% --- Plots ----------------------------------------------------------------
 figure('Name','Wave ramp run');
-nSub = 3 + double(logTrig);
+% Raw voltage goes in its own panel rather than on a second y axis of the eta
+% panel: the calibration is a CUBIC (polyval of wgCal.polynomial_coefficients),
+% so volts and cm are not a linear rescale of each other -- a twin axis implies
+% they are, and would print tick labels that don't match the curve's shape.
+% The panel is skipped when no calibration was found, since eta IS the voltage
+% then and it would just duplicate the panel below.
+showRaw = ~isempty(wgCal);
+nSub = 3 + double(showRaw) + double(logTrig);
 ax = gobjects(nSub, 1);
+iSub = 0;
 
-ax(1) = subplot(nSub,1,1);
+iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
 % plot (not stairs), as plot_experiment_signals.m draws run_experiment.m's
 % fan -- the AO actually holds each write for FAN_DT, but the fan's inertia
 % smooths the 0.9 V ramp-down steps anyway.
@@ -340,12 +350,23 @@ shade_camera(camOnT, camOffT);
 ylabel('Fan (V)'); grid on;
 title('Fan command (magenta = camera triggering)');
 
-ax(2) = subplot(nSub,1,2);
+if showRaw
+    iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
+    plot(hwT_wind, E_wg, 'LineWidth', 0.5);
+    shade_camera(camOnT, camOffT);
+    % Dashed = ends of the calibrated voltage range. Excursions past these are
+    % where eta is extrapolated off the cubic (the percentage is printed above).
+    yline(min(vc), 'r--'); yline(max(vc), 'r--');
+    ylabel('E_{wg} (V)'); grid on;
+    title('Wave gauge raw voltage (red dashed = calibrated range)');
+end
+
+iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
 plot(hwT_wind, eta, 'LineWidth', 0.5);
 shade_camera(camOnT, camOffT);
 ylabel(sprintf('\\eta (%s)', etaUnit)); title('Wave gauge'); grid on;
 
-ax(3) = subplot(nSub,1,3);
+iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
 % Frequency content through the ramp -- shows the peak moving as the waves grow.
 winS = 4;   % s
 % 4th output is the one-sided PSD (etaUnit^2/Hz); the first output |s|^2
@@ -358,7 +379,7 @@ ylim([0 10]); ylabel('f (Hz)'); title(sprintf('\\eta spectrogram (%g s windows)'
 shade_camera(camOnT, camOffT);
 
 if logTrig
-    ax(4) = subplot(nSub,1,4);
+    iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
     plot(hwT_wind, E_trig); hold on;
     plot(frameT, CAM_TRIG_THRESH * ones(size(frameT)), 'r.', 'MarkerSize', 4); hold off;
     ylabel('Trigger (V)'); title('Recorded camera trigger (red = detected frames)'); grid on;

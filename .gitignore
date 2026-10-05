@@ -12,3 +12,4 @@ experiment/processing_code/PIV/.claude/worktrees/naughty-shtern-efb6ff/articles/
 /experiment/processing_code/PIV/.claude
 experiment/processing_code/PIV/.claude/settings.local.json
 experiment/processing_code/PIV/.claude/settings.local.json
+*.csv

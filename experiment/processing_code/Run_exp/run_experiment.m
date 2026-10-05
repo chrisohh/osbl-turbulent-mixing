@@ -9,12 +9,13 @@
 % ASSUMPTIONS (check these before running):
 %   - USB-6451 (fan/hot-wire) is "Dev4" in NI MAX -- CHANGE if different
 %   - PCI-6621 (camera counters) is "Dev1" in NI MAX -- CHANGE if differentnn
-%   - Fan on Dev4/ao0, hot-wire on Dev4/ai0:ai2
+%   - Fan on Dev4/ao0, hot-wire on Dev4/ai0:ai2, reference probe on Dev4/ai4,
+%     wave gauge on Dev4/ai7 (SingleEnded) -- all selected via ENABLED_AI
 %   - Fan ramp: 1.5->8V over 60s, hold 30s, ramp down 5s -- adjust as needed
 %   - Hot-wire: 4 kHz sample rate
 %   - Camera counters, all 50 Hz: IR/ctr2 (duty arbitrary -- IR sets its own
-%     exposure), Color/ctr1 and Mono/ctr3 (0.035 duty = 700us exposure, since
-%     these trigger on HIGH level so pulse width = exposure time)
+%     exposure), Color/ctr1 (0.025 duty = 500us) and Mono/ctr3 (0.035 duty =
+%     700us), since these trigger on HIGH level so pulse width = exposure time)
 %   - ctr3 feeds BOTH the Mono side camera and the Mono under-tank camera
 %
 % NOT verified -- confirm before relying on this:
@@ -109,33 +110,51 @@ end
 % CONFIRM: RefProbe is SingleEnded here because only one pin (ai4) was given.
 % If it is actually wired differentially it uses ai4/ai12 and 'term' must be
 % "Differential" instead.
+% WaveGauge is the resistance wave gauge on ai7, SingleEnded -- same channel
+% and terminal config as WaveGauge_receiver.m and Wave_Gauge/
+% run_wavegauge_fan_calibration.m use. It rides along in this same AI task, so
+% eta shares one clock with the hot-wire and the camera triggers; no second
+% session, no cross-session drift.
+% NOT VERIFIED: enabling WaveGauge alongside Hotwire/RefProbe makes this a
+% MIXED-terminal task (SingleEnded + Differential) for the first time --
+% setup_hotwire_daq.m's header already flags that as unconfirmed on this
+% device. If addinput errors, either run the gauge on its own or rewire it
+% differentially (ai7 pairs with ai15) and change 'term' below.
 % Channels are selected by GROUP, not individually: Probe1-3 are the three
 % sensors of one tri-axial probe and are always logged together (the U,V,W
 % decomposition needs all three), so they cannot be split apart here.
 allAiConfig = struct( ...
-    'group', {'Hotwire',      'Hotwire',      'Hotwire',      'RefProbe'}, ...
-    'name',  {'Probe1',       'Probe2',       'Probe3',       'RefProbe'}, ...
-    'chan',  {"ai0",          "ai1",          "ai2",          "ai4"}, ...
-    'term',  {"Differential", "Differential", "Differential", "Differential"}, ...
-    'range', {[-10 10],       [-10 10],       [-10 10],       [-10 10]});
+    'group', {'Hotwire',      'Hotwire',      'Hotwire',      'RefProbe',     'WaveGauge'}, ...
+    'name',  {'Probe1',       'Probe2',       'Probe3',       'RefProbe',     'WaveGauge'}, ...
+    'chan',  {"ai0",          "ai1",          "ai2",          "ai4",          "ai7"}, ...
+    'term',  {"Differential", "Differential", "Differential", "Differential", "SingleEnded"}, ...
+    'range', {[-10 10],       [-10 10],       [-10 10],       [-10 10],       [-10 10]});
 
-% Valid groups: 'Hotwire', 'RefProbe'. Use {'RefProbe'} for reference only,
-% {'Hotwire'} to skip the reference, or both.
-ENABLED_AI = {'Hotwire'};%'Hotwire','Hotwire', 'RefProbe
+% Valid groups: 'Hotwire', 'RefProbe', 'WaveGauge'. Any combination -- e.g.
+% {'RefProbe'} for reference only, {'Hotwire','WaveGauge'} to log waves
+% alongside the probe, {'WaveGauge'} for the gauge alone.
+% NOTE: every channel in the task shares HOTWIRE_FS. At 4 kHz the gauge is
+% heavily oversampled (waves are a few Hz) -- harmless, just a bigger file.
+ENABLED_AI = {'Hotwire'};%'Hotwire','Hotwire', 'RefProbe', 'WaveGauge'
 aiConfig   = allAiConfig(ismember({allAiConfig.group}, ENABLED_AI));
 aiNames    = {aiConfig.name};
 aiGroups   = {aiConfig.group};
 hasHotwire = any(strcmp(aiGroups, 'Hotwire'));
 hasRef     = any(strcmp(aiGroups, 'RefProbe'));
+hasWave    = any(strcmp(aiGroups, 'WaveGauge'));
 
 if isempty(aiConfig)
-    error('ENABLED_AI selected no channels -- valid groups are ''Hotwire'' and ''RefProbe''.');
+    error('ENABLED_AI selected no channels -- valid groups are ''Hotwire'', ''RefProbe'' and ''WaveGauge''.');
+end
+badGroups = setdiff(ENABLED_AI, {allAiConfig.group});
+if ~isempty(badGroups)
+    error('ENABLED_AI contains unknown group(s): %s', strjoin(badGroups, ', '));
 end
 
 DEV_CAMERAS = "Dev3";   % <-- confirm this matches NI MAX for the PCI-6621
 % Pulse width IS the exposure: these cameras are set to trigger on HIGH level,
 % so they expose for as long as the line is high. At 50 Hz (20000us period),
-% dutyCycle = exposure_us / 20000 -- so 0.035 = 700us.
+% dutyCycle = exposure_us / 20000 -- so 0.025 = 500us and 0.035 = 700us.
 % IR ignores pulse width (its exposure is set in its own software), so its
 % 0.5 is arbitrary.
 %
@@ -149,7 +168,7 @@ allCamConfig = struct( ...
     'name',      {'IR',   'Color',  'Mono'}, ...
     'ctr',       {'ctr2', 'ctr1', 'ctr3'}, ...
     'freq',      {50,     50,   50}, ...
-    'dutyCycle', {0.5,    0.035, 0.035}, ...
+    'dutyCycle', {0.5,    0.025, 0.035}, ...   % Color 500us, Mono 700us
     'delay',     {0,      0,    0});
 
 % 'Mono' here means the ctr3 line, i.e. Mono side + Mono under-tank.
@@ -163,6 +182,38 @@ camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % <-- this probe's cal/header
 CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn + parse_probe_section
 addpath(CTA_DIR);
+
+% Wave gauge volts -> cm, from a STATIC calibration (still water, fan off)
+% made by Wave_Gauge/run_wavegauge_calibration.m. Empty = use the newest
+% wave_gauge_calibration_*.mat found in the Wave_Gauge folder, here, or the
+% current folder. Without one, eta stays in VOLTS -- the run is still valid,
+% it just isn't in physical units. Same lookup as
+% Wave_Gauge/run_wavegauge_fan_calibration.m.
+WG_DIR      = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\Wave_Gauge';
+WG_CAL_FILE = '';
+wgCal = [];
+if hasWave
+    if isempty(WG_CAL_FILE)
+        wgSearch = unique({WG_DIR, fileparts(mfilename('fullpath')), pwd});
+        fWg = [];
+        for iWg = 1:numel(wgSearch)
+            fWg = [fWg; dir(fullfile(wgSearch{iWg}, 'wave_gauge_calibration_*.mat'))]; %#ok<AGROW>
+        end
+        if ~isempty(fWg)
+            [~, iNewest] = max([fWg.datenum]);
+            WG_CAL_FILE = fullfile(fWg(iNewest).folder, fWg(iNewest).name);
+        end
+        clear wgSearch fWg iWg iNewest
+    end
+    if ~isempty(WG_CAL_FILE)
+        Swg = load(WG_CAL_FILE, 'calibration');
+        wgCal = Swg.calibration;
+        fprintf('Wave gauge calibration: %s\n', WG_CAL_FILE);
+        clear Swg
+    else
+        warning('No wave gauge calibration found -- eta will be in VOLTS.');
+    end
+end
 
 %% Set up hot-wire AI task (background acquisition, starts immediately)
 % No total-time is fed in: totalTime was never actually wired into a scan
@@ -415,6 +466,35 @@ if hasRef
         min(U_ref), max(U_ref), 100*nnz(belowRef)/numel(E_ref), 100*nnz(aboveRef)/numel(E_ref));
 end
 
+%% Wave gauge: volts -> surface elevation (same pipeline as the Wave_Gauge scripts)
+E_wg = [];
+eta = [];
+etaUnit = '';
+if hasWave
+    E_wg = data{:, strcmp(aiNames, 'WaveGauge')};
+    if ~isempty(wgCal)
+        % Cubic fit from the static calibration; outside the calibrated
+        % voltage span this is extrapolation off the end of that cubic, which
+        % diverges fast -- so the share is reported, not silently accepted.
+        eta = polyval(wgCal.polynomial_coefficients, E_wg);
+        etaUnit = 'cm';
+        vc = wgCal.voltage_calib;
+        if isfield(wgCal, 'clipped'), vc = vc(~wgCal.clipped); end   % older cal files lack it
+        outOfCal = E_wg < min(vc) | E_wg > max(vc);
+        fprintf('Wave gauge: eta %.2f..%.2f cm (%.1f%% of samples outside the calibrated voltage range -- extrapolated).\n', ...
+            min(eta), max(eta), 100*nnz(outOfCal)/numel(E_wg));
+    else
+        eta = E_wg;
+        etaUnit = 'V';
+        fprintf('Wave gauge: %.3f..%.3f V (no calibration -- eta is in volts).\n', min(E_wg), max(E_wg));
+    end
+    wgRange = aiConfig(strcmp(aiNames, 'WaveGauge')).range;
+    if any(E_wg <= wgRange(1) + 0.05 | E_wg >= wgRange(2) - 0.05)
+        warning('%.2f%% of wave gauge samples are at the +-%g V input limit.', ...
+            100*nnz(E_wg <= wgRange(1) + 0.05 | E_wg >= wgRange(2) - 0.05)/numel(E_wg), wgRange(2));
+    end
+end
+
 %% Convert hot-wire voltages to velocity (same pipeline as convertE2U.m)
 % Left empty when the Hotwire group is not enabled, rather than saving filler
 % that could later be mistaken for real data.
@@ -457,10 +537,12 @@ runConfig = struct( ...
     'HOTWIRE_FS', HOTWIRE_FS, 'DELAY_BEFORE_TRIG', DELAY_BEFORE_TRIG, ...
     'PRE_WIND_BASELINE_T', PRE_WIND_BASELINE_T, ...
     'ENABLED_AI', {ENABLED_AI}, 'ENABLED_CAMERAS', {ENABLED_CAMERAS}, ...
+    'WG_CAL_FILE', WG_CAL_FILE, ...
     'fanTF', []);
 if FAN_RAMP_LINEAR_U, runConfig.fanTF = tf; end
 saveVars = {'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE', ...
             'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', 'U_ref', ...
+            'E_wg', 'eta', 'etaUnit', 'wgCal', 'WG_CAL_FILE', ...
             'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
             'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
             'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter', ...
@@ -504,7 +586,12 @@ plot_experiment_signals('actual', ...
 % (No hwT_wind=hwT here: that overwrote the wind clock before the save, so
 % saved files had hwT_wind ~0.1 s off, and it would hide any pre-wind
 % baseline. hwT_wind is already 0 = wind start from the read-back above.)
-nSub = 2*double(hasHotwire) + 2*double(hasRef);
+% The wave gauge contributes two rows when calibrated (raw volts, then eta)
+% and one when not -- uncalibrated, eta IS the voltage, so a second row would
+% just repeat the first. Raw volts get their own row rather than a second y
+% axis on the eta row: the calibration is a cubic, so volts and cm are not a
+% linear rescale of each other and a twin axis would imply they are.
+nSub = 2*double(hasHotwire) + 2*double(hasRef) + double(hasWave)*(1 + double(~isempty(wgCal)));
 if nSub > 0
     figure;
     iSub = 0;
@@ -546,6 +633,31 @@ if nSub > 0
         ylabel('Velocity (m/s)');
         legend('U', 'V', 'W');
         title('Converted velocity (probe coordinates)');
+        grid on;
+    end
+
+    if hasWave
+        if ~isempty(wgCal)
+            iSub = iSub + 1;
+            subplot(nSub,1,iSub)
+            plot(hwT_wind, E_wg, 'LineWidth', 0.5);
+            % Dashed = ends of the calibrated voltage span; beyond them eta is
+            % extrapolated off the cubic (percentage printed above).
+            yline(min(vc), 'r--'); yline(max(vc), 'r--');
+            xlabel('Time since wind start (s)');
+            ylabel('Voltage (V)');
+            legend('E_{wg}');
+            title('Wave gauge raw voltage (ai7; red dashed = calibrated range)');
+            grid on;
+        end
+
+        iSub = iSub + 1;
+        subplot(nSub,1,iSub)
+        plot(hwT_wind, eta, 'LineWidth', 0.5);
+        xlabel('Time since wind start (s)');
+        ylabel(sprintf('\\eta (%s)', etaUnit));
+        legend('\eta');
+        title(sprintf('Wave gauge surface elevation (%s)', etaUnit));
         grid on;
     end
 end
