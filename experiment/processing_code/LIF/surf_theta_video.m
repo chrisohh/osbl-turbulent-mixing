@@ -4,6 +4,7 @@
 %   1. raw counts as recorded, dye front / surface / local z99(x)
 %   2. theta = ln(I_bg/I) (dye concentration, lighting removed)
 %   3. all-x averaged theta vs depth, z99 and the 5-95% spread of z99(x)
+% For the stripped theta-over-hot-wire video, see theta_hw_video.m.
 % Title: time since wind start, t = camDelay + (n-1)/fs, from the hot-wire
 % file.  The z99 / dye-front time series is saved next to the video
 % (<out_file>_z99.mat) for the z99(t) plot.
@@ -11,12 +12,12 @@ clear; close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
-raw_root  = 'D:\HLAB_2026\Core';
+raw_root  = 'C:\Users\Administrator\Downloads\';
 cam       = 'Water_Surf';
 run_num   = 95;
 
 frame_start = 1;
-frame_step  = 5;           % every Nth acquired frame
+frame_step  = 10;           % every Nth acquired frame
 frame_end   = [];          % [] = last available
 
 plate_num = 94;  plate_frm = 1;
@@ -26,7 +27,7 @@ sc.offset_mm   = 25;       % plate was this far TOWARD the camera
 sc.n_medium    = 1.33;
 sc.lens_f_mm   = 35;       % <-- CHECK
 
-hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
+hw_file = 'C:\Users\Administrator\Downloads\hotwire_20260923_113939.mat';
 fs      = 50;
 
 % Hot-wire panel under the images, vertical line at the frame time
@@ -37,15 +38,15 @@ hw_xlim  = [];             % s since wind start; [] = whole record
 downsample = 2;
 
 fo.cmap            = 'bone';    % see lif_surf_figure
-fo.left            = 'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
+fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
 fo.trans_clims     = [0.75 1.05];
-fo.theta_clims     = [0 0.05];
+fo.theta_clims     = [0 0.25];
 fo.theta_log       = false;
 fo.theta_clims_log = [0.005 0.3];
 fo.profile_xlim    = [-0.01 0.3];
 fo.profile_zlim    = [-15 0];
 fo.fig_pos         = [40 40 2000 650];
-fo.visible         = 'off';
+fo.visible         = 'on';
 
 dy.dye_frac       = 0.90;  % see lif_dye_front
 dy.dye_thr        = [];
@@ -59,7 +60,10 @@ zo.surf_gap_cm   = dy.surf_gap_cm;
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
 zo.bin_cm        = 1;
-bg_frame         = 1;      % dye-free frame -> theta = ln(I_bg/I)
+zo.snr_min       = 4;      % no z99 unless theta clears this many sigma of the noise
+zo.tail_cm       = 1;      % integral stops after this much quiet water (see lif_z99)
+bg_frames        = 1:10:100;   % dye-free frames, averaged -> theta = ln(I_bg/I).
+                           % ALL must be dye-free: check when the dye arrives.
 dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtracted from I and I_bg; [] = none
 
 out_file      = fullfile(raw_root, sprintf('CoreView_%d', run_num), ...
@@ -91,10 +95,12 @@ x_cm =  ((1:nx)*downsample - c0(1)) * mmpp / 10;
 z_cm = -((1:ny)*downsample - c0(2)) * mmpp / 10;
 
 zo.bg = [];
-if ~isempty(bg_frame)
-    zo.bg = lif_load_raw(fname(bg_frame));
-    zo.bg = zo.bg(1:downsample:end, 1:downsample:end);
-    fprintf('Background: frame %d (dye-free)\n', bg_frame);
+if ~isempty(bg_frames)
+    bg_frames = intersect(bg_frames, avail);
+    if isempty(bg_frames), error('None of the requested bg_frames exist in %s', cam_dir); end
+    zo.bg = lif_load_bg(fname, bg_frames, downsample);
+    fprintf('Background: mean of %d dye-free frames (%d..%d)\n', ...
+            numel(bg_frames), min(bg_frames), max(bg_frames));
     zo.dark = [];
     if ~isempty(dark_file)
         zo.dark = lif_load_raw(dark_file);
@@ -103,7 +109,7 @@ if ~isempty(bg_frame)
     end
     [z0, z_cm, dy] = lif_surface_datum(zo.bg, z_cm, mmpp*downsample, dy);   % z = 0 at the bg-frame water level
 else
-    warning('No bg_frame: z stays measured from the plate (board centre).');
+    warning('No bg_frames: z stays measured from the plate (board centre).');
 end
 
 [~, hw_name] = fileparts(hw_file);
@@ -149,7 +155,10 @@ for i = 1:nFrames
                 run_num, n, t_wind(i)), t_wind(i));
 
     rgb = print(h.fig, '-RGBImage', '-r0');                 % works with an invisible figure
-    rgb = rgb(1:2*floor(end/2), 1:2*floor(end/2), :);       % H.264 needs even size
+    if i == 1
+        vsz = 2*floor([size(rgb,1) size(rgb,2)]/2);         % H.264 needs even size
+    end
+    rgb = lif_fit_frame(rgb, vsz);                          % print size can drift by a pixel
     writeVideo(v, rgb);
 
     if mod(i, 25) == 0 || i == nFrames
@@ -162,10 +171,11 @@ clear cleanupObj;   % closes the writer
 fprintf('\nWrote %s  (%d frames, %.1f s)\n', out_file, nFrames, toc);
 
 %% ---------------- Save the z99 time series ----------------
-% Frame bg_frame is the dye-free reference itself: its z99 is noise.
+% z99 is NaN while there is no detectable dye (bg_frames included: they are
+% the reference itself), so the time series starts where the dye arrives.
 depth_all = z_surf_all - z_front_all;       % [nFrames x nx] cm below surface
 zo = rmfield(zo, intersect({'bg', 'dark'}, fieldnames(zo)));   % don't save images
-zo.bg_frame = bg_frame;  zo.dark_file = dark_file;
+zo.bg_frames = bg_frames;  zo.dark_file = dark_file;
 [p, b] = fileparts(out_file);
 ts_file = fullfile(p, [b '_z99.mat']);
 save(ts_file, 'frames', 't_wind', 'x_cm', 'z99_all', 'z99_x_all', 'x99_cm', ...
