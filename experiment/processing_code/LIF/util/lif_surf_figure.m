@@ -23,12 +23,20 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
 %      line at the frame time (lif_surf_update's t_frame).  Struct with
 %      t (s since wind start), Y ([nt x nseries] m/s), names (cell, LaTeX),
 %      xlim ([] = whole record).  fig_pos grows to fit when given.
+%   panels 'all' -- which panels to build:
+%      'all'   the three panels above
+%      'theta' theta only, full width, over the hot-wire panel.  Panels 1
+%              and 3 are not created and their handles come back empty;
+%              lif_surf_update skips whatever is missing.
+%   show_z99 true -- false drops the z99 overlays (and the z99 entries from
+%      the legends), for frames where z99 is not the point
 
     def = struct('cmap', 'bone', 'clims', [350 600], 'theta_clims', [0 0.05], ...
                  'theta_log', false, 'theta_clims_log', [0.005 0.3], ...
                  'profile_xlim', [-0.01 0.3], 'profile_zlim', [-15 0], ...
                  'fig_pos', [40 40 2000 650], 'visible', 'on', ...
-                 'left', 'transmission', 'trans_clims', [0.75 1.05], 'hw', []);
+                 'left', 'transmission', 'trans_clims', [0.75 1.05], 'hw', [], ...
+                 'panels', 'all', 'show_z99', true);
     if nargin < 3, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -37,30 +45,41 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     nx = numel(x_cm);  ny = numel(z_cm);
 
     h.opts = opts;
-    has_hw = ~isempty(opts.hw);
+    has_hw     = ~isempty(opts.hw);
+    theta_only = strcmp(opts.panels, 'theta');
     if has_hw && isequal(opts.fig_pos, def.fig_pos), opts.fig_pos(4) = 1000; end
     h.fig  = figure('Position', opts.fig_pos, 'Color', 'w', 'Visible', opts.visible);
-    tl     = tiledlayout(h.fig, 1 + 2*has_hw, 7, 'TileSpacing', 'compact', 'Padding', 'compact');
+    ncol   = 7;
+    tl     = tiledlayout(h.fig, 1 + 2*has_hw, ncol, 'TileSpacing', 'compact', 'Padding', 'compact');
     img_rows = 1 + has_hw;                             % images get 2/3 of the height with hw
 
-    % 1. transmission I/I_bg (or raw counts)
-    h.axR = nexttile(tl, 1, [img_rows 3]);
-    h.imR = imagesc(h.axR, x_cm, z_cm, nan(ny, nx));
-    colormap(h.axR, opts.cmap);
-    cb = colorbar(h.axR); cb.Label.Interpreter = 'latex';
-    if strcmp(opts.left, 'transmission')
-        caxis(h.axR, opts.trans_clims);
-        cb.Label.String = '$I/I_{\rm bg}$';
-        title(h.axR, 'transmission $I/I_{\rm bg}$ (lighting removed)', 'Interpreter', 'latex');
-    else
-        caxis(h.axR, opts.clims);
-        cb.Label.String = 'counts';
-        title(h.axR, 'raw', 'Interpreter', 'latex');
-    end
-    [h.sfR, h.z9R] = overlays(h.axR, x_cm, nx, c99);
+    [h.axR, h.imR, h.sfR, h.z9R] = deal(gobjects(0));
+    [h.axP, h.prP, h.z9P, h.bandP, h.ttP] = deal(gobjects(0));
 
-    % 2. theta
-    h.axT = nexttile(tl, 4, [img_rows 3]);
+    % 1. transmission I/I_bg (or raw counts)
+    if ~theta_only
+        h.axR = nexttile(tl, 1, [img_rows 3]);
+        h.imR = imagesc(h.axR, x_cm, z_cm, nan(ny, nx));
+        colormap(h.axR, opts.cmap);
+        cb = colorbar(h.axR); cb.Label.Interpreter = 'latex';
+        if strcmp(opts.left, 'transmission')
+            caxis(h.axR, opts.trans_clims);
+            cb.Label.String = '$I/I_{\rm bg}$';
+            title(h.axR, 'transmission $I/I_{\rm bg}$ (lighting removed)', 'Interpreter', 'latex');
+        else
+            caxis(h.axR, opts.clims);
+            cb.Label.String = 'counts';
+            title(h.axR, 'raw', 'Interpreter', 'latex');
+        end
+        [h.sfR, h.z9R] = overlays(h.axR, x_cm, nx, c99, opts.show_z99);
+    end
+
+    % 2. theta -- full width when it is the only image
+    if theta_only
+        h.axT = nexttile(tl, 1, [img_rows ncol]);
+    else
+        h.axT = nexttile(tl, 4, [img_rows 3]);
+    end
     h.imT = imagesc(h.axT, x_cm, z_cm, nan(ny, nx));
     colormap(h.axT, flipud(feval(opts.cmap, 256)));   % dye dark, as in the raw image
     if opts.theta_log
@@ -70,10 +89,14 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     end
     cb = colorbar(h.axT); cb.Label.Interpreter = 'latex';
     cb.Label.String = '$\theta = \ln(I_{\rm bg}/I)$';
-    [h.sfT, h.z9T] = overlays(h.axT, x_cm, nx, c99);
+    [h.sfT, h.z9T] = overlays(h.axT, x_cm, nx, c99, opts.show_z99);
     title(h.axT, '$\theta$ (dye concentration)', 'Interpreter', 'latex');
-    legend(h.axT, {'surface', '$z_{99}(x)$'}, ...
-           'Interpreter', 'latex', 'Location', 'southeast');
+    if opts.show_z99
+        legend(h.axT, [h.sfT h.z9T], {'surface', '$z_{99}(x)$'}, ...
+               'Interpreter', 'latex', 'Location', 'southeast');
+    else
+        legend(h.axT, h.sfT, {'surface'}, 'Interpreter', 'latex', 'Location', 'southeast');
+    end
 
     for ax = [h.axR h.axT]
         axis(ax, 'image'); set(ax, 'YDir', 'normal');
@@ -83,26 +106,30 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     end
 
     % 3. profile
-    h.axP = nexttile(tl, 7, [img_rows 1]);
-    hold(h.axP, 'on');
-    h.bandP = patch(h.axP, opts.profile_xlim([1 2 2 1]), [NaN NaN NaN NaN], c99, ...
-                    'FaceAlpha', 0.25, 'EdgeColor', 'none');
-    xline(h.axP, 0, ':');
-    h.prP = plot(h.axP, NaN, NaN, 'k-', 'LineWidth', 1.2);
-    h.z9P = plot(h.axP, opts.profile_xlim, [NaN NaN], '-', 'Color', c99, 'LineWidth', 2);
-    hold(h.axP, 'off'); grid(h.axP, 'on'); box(h.axP, 'on');
-    xlim(h.axP, opts.profile_xlim); ylim(h.axP, opts.profile_zlim);
-    xlabel(h.axP, '$\overline{\theta}$ (all $x$)', 'Interpreter', 'latex');
-    ylabel(h.axP, '$z - \eta$ (cm, 0 = local surface)', 'Interpreter', 'latex');
-    legend(h.axP, [h.z9P h.bandP], {'$z_{99}$', '$z_{99}(x)$ 5--95\%'}, ...
-           'Interpreter', 'latex', 'Location', 'southeast');
-    set(h.axP, 'FontSize', 12, 'FontName', 'times');
-    h.ttP = title(h.axP, '', 'Interpreter', 'latex');
+    if ~theta_only
+        h.axP = nexttile(tl, 7, [img_rows 1]);
+        hold(h.axP, 'on');
+        h.bandP = patch(h.axP, opts.profile_xlim([1 2 2 1]), [NaN NaN NaN NaN], c99, ...
+                        'FaceAlpha', 0.25, 'EdgeColor', 'none');
+        xline(h.axP, 0, ':');
+        h.prP = plot(h.axP, NaN, NaN, 'k-', 'LineWidth', 1.2);
+        h.z9P = plot(h.axP, opts.profile_xlim, [NaN NaN], '-', 'Color', c99, 'LineWidth', 2);
+        hold(h.axP, 'off'); grid(h.axP, 'on'); box(h.axP, 'on');
+        xlim(h.axP, opts.profile_xlim); ylim(h.axP, opts.profile_zlim);
+        xlabel(h.axP, '$\overline{\theta}$ (all $x$)', 'Interpreter', 'latex');
+        ylabel(h.axP, '$z - \eta$ (cm, 0 = local surface)', 'Interpreter', 'latex');
+        if opts.show_z99
+            legend(h.axP, [h.z9P h.bandP], {'$z_{99}$', '$z_{99}(x)$ 5--95\%'}, ...
+                   'Interpreter', 'latex', 'Location', 'southeast');
+        end
+        set(h.axP, 'FontSize', 12, 'FontName', 'times');
+        h.ttP = title(h.axP, '', 'Interpreter', 'latex');
+    end
 
     % 4. hot-wire time series, vertical line at the frame time
     h.hwLine = [];
     if has_hw
-        h.axH = nexttile(tl, 7*img_rows + 1, [1 7]);
+        h.axH = nexttile(tl, ncol*img_rows + 1, [1 ncol]);
         plot(h.axH, opts.hw.t, opts.hw.Y, 'LineWidth', 0.8);
         hold(h.axH, 'on');
         h.hwLine = xline(h.axH, opts.hw.t(1), 'r-', 'LineWidth', 2);   % moved per frame
@@ -119,9 +146,12 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     h.tt = title(tl, '', 'Interpreter', 'latex', 'FontSize', 15);
 end
 
-function [hs, h9] = overlays(ax, x_cm, nx, c99)
+function [hs, h9] = overlays(ax, x_cm, nx, c99, show_z99)
     hold(ax, 'on');
     hs = plot(ax, x_cm, nan(1, nx), 'c--', 'LineWidth', 1);
-    h9 = plot(ax, NaN, NaN, '-', 'Color', c99, 'LineWidth', 2);
+    h9 = gobjects(0);
+    if show_z99
+        h9 = plot(ax, NaN, NaN, '-', 'Color', c99, 'LineWidth', 2);
+    end
     hold(ax, 'off');
 end

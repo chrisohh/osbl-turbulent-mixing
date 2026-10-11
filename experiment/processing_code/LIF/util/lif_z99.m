@@ -41,9 +41,16 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
 %   bin_cm 1 (x bin width for z99_x)
 %   dark [] (dark frame, same size as I: subtracted from I and bg before the
 %   ratio -- any camera offset biases I/I_bg, most in the dark lower image)
+%   snr_min 4 (NaN z99 unless theta somewhere above the front exceeds this
+%   many robust sigma of the clear-water noise: no dye -> no z99, rather
+%   than a z99 at the bottom of the frame)
+%   tail_cm 1 (the integral stops at the first depth below which theta stays
+%   inside the noise for this many cm, so the clear-water tail cannot own
+%   the last 1% -- see z99_of)
 %
 % Outputs:
-%   z99_x     - [1 x nbin] local z99 (cm, NEGATIVE = below the surface)
+%   z99_x     - [1 x nbin] local z99 (cm, NEGATIVE = below the surface;
+%               NaN where there is no detectable dye)
 %   jc        - [1 x nbin] centre column of each bin (index into x / z_surf)
 %   z99       - frame-wide z99 (cm), all x averaged as in the paper
 %   zeta      - [nz x 1] depth grid (cm, 0 = surface, negative down)
@@ -55,7 +62,8 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
 %               exp(-theta_img) when there is no bg
 
     def = struct('frac', 0.99, 'smooth_mm', 1.5, 'surf_gap_cm', 0.4, ...
-                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'dark', []);
+                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'dark', [], ...
+                 'snr_min', 4, 'tail_cm', 1);
     if nargin < 6, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -113,6 +121,11 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
         TH(:, j) = interp1(z - z_surf(j), th, zeta, 'linear', NaN);
     end
 
+    % Depth below which the water is clear, i.e. where theta is pure noise:
+    % the dye front is the deepest dye the image shows.  NaN front = the
+    % column never left the clear-water threshold, so there is no dye at all.
+    depth_front = z_front - z_surf;                    % [1 x nx], <= 0, NaN = clear
+
     % Local z99(x): same integral on the theta averaged over each x bin
     nb    = max(1, round(10*opts.bin_cm / dx_mm));     % columns per bin
     edges = 1 : nb : nx;
@@ -121,23 +134,62 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
     for b = 1:numel(edges)
         cols  = edges(b) : min(edges(b) + nb - 1, nx);
         jc(b) = round(mean(cols));
-        z99_x(b) = z99_of(zeta, mean(TH(:, cols), 2, 'omitnan'), opts.frac);
+        z99_x(b) = z99_of(zeta, mean(TH(:, cols), 2, 'omitnan'), ...
+                          median(depth_front(cols), 'omitnan'), opts);
     end
 
     theta_bar = mean(TH, 2, 'omitnan');
     ok = ~isnan(theta_bar);
-    z99  = z99_of(zeta(ok), theta_bar(ok), opts.frac);
+    z99  = z99_of(zeta(ok), theta_bar(ok), median(depth_front, 'omitnan'), opts);
     zeta = zeta(ok);  theta_bar = theta_bar(ok);
 end
 
-function z = z99_of(zeta, th, frac)
-    % Level above which frac of the integral of th lies (zeta <= 0, top first)
-    ok = ~isnan(th);
+function z = z99_of(zeta, th, z_front, opts)
+    % Level above which opts.frac of the integral of th lies (zeta <= 0, top
+    % first).  z_front = dye-front depth for this profile (<= 0, NaN = none).
+    %
+    % The 99% criterion is brutally sensitive to the deep tail: the last 1%
+    % of the integral is the same size as the noise collected over a few cm
+    % of clear water.  Taken literally it over-predicts in exactly the two
+    % cases below, so both are handled before the integral is formed.
+    %   no dye        - C(end) is a zero-mean random walk that only reaches
+    %                   its final value at the last row, so the 99% crossing
+    %                   lands at the bottom of the frame.  C(end) > 0 half
+    %                   the time, so the old `C(end) <= 0` guard caught only
+    %                   half of these.
+    %   thin layer    - the layer contributes A near the surface, the noise
+    %                   below contributes ~sigma*sqrt(H*dz) with either sign,
+    %                   and once that is ~A/100 the crossing is set by the
+    %                   noise rather than by the dye.
     z  = NaN;
+    ok = ~isnan(th);
     if nnz(ok) < 2, return; end
     zeta = zeta(ok);  th = th(ok);
+    dz   = abs(zeta(2) - zeta(1));
+
+    % Noise floor of theta, from the clear water below the front
+    if isnan(z_front), z_front = 0; end
+    z_clear = min(z_front - opts.fit_margin_cm, 0.75 * min(zeta));
+    nz = zeta <= z_clear;
+    if nnz(nz) < 10, return; end
+    sig = 1.4826 * median(abs(th(nz) - median(th(nz))));   % robust sigma
+    if ~(sig > 0), return; end
+
+    % No dye: theta never rises out of the noise -> z99 undefined, not deep
+    if max(th(zeta > z_clear)) < opts.snr_min * sig, return; end
+
+    % Integrate only over the depth where dye is still detectable: the first
+    % level below which theta stays inside the noise for opts.tail_cm.  This
+    % is what stops the clear-water tail from owning the last 1%.
+    nrun  = max(2, round(opts.tail_cm / dz));
+    quiet = movmax(th, [0 nrun-1]) < sig;              % th and the next tail_cm
+    k_end = find(quiet, 1, 'first');
+    if isempty(k_end), k_end = numel(zeta); end
+    if k_end < 2, return; end
+    zeta = zeta(1:k_end);  th = th(1:k_end);
+
     C = cumtrapz(-zeta, th);                           % integral from the surface down
     if C(end) <= 0, return; end
-    k = find(C >= frac * C(end), 1, 'first');
+    k = find(C >= opts.frac * C(end), 1, 'first');
     z = zeta(k);
 end
