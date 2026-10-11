@@ -13,9 +13,10 @@
 %     wave gauge on Dev4/ai7 (SingleEnded) -- all selected via ENABLED_AI
 %   - Fan ramp: 1.5->8V over 60s, hold 30s, ramp down 5s -- adjust as needed
 %   - Hot-wire: 4 kHz sample rate
-%   - Camera counters, all 50 Hz: IR/ctr2 (duty arbitrary -- IR sets its own
-%     exposure), Color/ctr1 (0.025 duty = 500us) and Mono/ctr3 (0.035 duty =
-%     700us), since these trigger on HIGH level so pulse width = exposure time)
+%   - Camera counters all share CAM_FS (default 50 Hz): IR/ctr2 (exposure
+%     arbitrary -- IR sets its own), Color/ctr1 (500us) and Mono/ctr3 (700us),
+%     set via CAM_EXPOSURE_US, since these trigger on HIGH level so pulse
+%     width = exposure time
 %   - ctr3 feeds BOTH the Mono side camera and the Mono under-tank camera
 %
 % NOT verified -- confirm before relying on this:
@@ -88,10 +89,46 @@ FAN_DT      = 0.5;  % seconds, step interval
 HOTWIRE_FS       = 4000;   % Hz
 DELAY_BEFORE_TRIG = 10;    % seconds after wind start before starting camera counters
 PRE_WIND_BASELINE_T = 0;   % seconds of zero-flow hot-wire data before the fan startsn (0 to skip)
+% With the wave gauge enabled this is also the still-water window eta is zeroed
+% against, which is what removes the gauge's offset drift (measured at
+% 0.007 cm/min, and 0.2 cm between calibrations 1.5 h apart -- both far larger
+% than anything else in the eta error budget). A wave gauge run therefore wants
+% a non-zero baseline, so if ENABLED_AI includes WaveGauge and this is still 0,
+% it is raised to WG_BASELINE_MIN_T below. An explicit batch override is never
+% overridden, even to 0.
+WG_BASELINE_MIN_T   = 10;  % s, minimum still-water window for zeroing the gauge
+WG_ZERO_FROM_BASELINE = true;   % false = keep eta on the calibration's own datum
+
+% ---- Channel + camera selection ----------------------------------------
+% These live ABOVE the batch-override block on purpose: a wrapper script
+% (run_surface_clean.m) needs to change the camera rate and the logged
+% channels, and only settings defined above that block are overridable.
+% What each one may contain is documented at the config it feeds, below.
+ENABLED_AI      = {'Hotwire'};   % 'Hotwire', 'RefProbe', 'WaveGauge'
+DEV_CAMERAS     = "Dev3";        % <-- confirm this matches NI MAX for the PCI-6621
+ENABLED_CAMERAS = {'IR','Mono'}; % {'IR','Color','Mono'}, or {} for none
+CAM_FS          = 50;            % Hz, trigger rate shared by every enabled camera
+
+% Exposure per camera in MICROSECONDS -- not duty cycle, deliberately.
+% setup_camera_triggers.m sets ch.DutyCycle (the PulseWidth path its own header
+% describes is NOT implemented), and these cameras expose for as long as the
+% line is HIGH, so exposure = dutyCycle/freq. A fixed duty cycle would
+% therefore stretch every exposure in proportion as CAM_FS drops -- at 5 Hz the
+% old 0.025 duty would be 5ms, not 500us. Giving exposure here and deriving
+% duty where allCamConfig is built keeps exposure fixed when CAM_FS changes,
+% which is what a low-rate run needs.
+% IR ignores pulse width entirely (exposure set in its own software).
+% Mono is 700us, matching the 0.035 duty this file's header always documented;
+% the 0.95 duty (19ms) previously hard-coded here was for laser work and is not
+% wanted for camera runs (user, 2026-10-05).
+CAM_EXPOSURE_US = struct('IR', 10000, 'Color', 500, 'Mono', 19000);
 
 % Batch overrides (e.g. FAN_RAMP_STOP_T, PRE_WIND_BASELINE_T) replace the
 % values above for this run only. Only settings defined ABOVE this point can
 % be overridden -- a misspelt name errors instead of being silently ignored.
+% batchOverrideNames is kept (not cleared) so later defaults can tell an
+% explicitly overridden setting from one still at its scripted value.
+batchOverrideNames = {};
 if ~isempty(BATCH_RUN) && isfield(BATCH_RUN, 'overrides')
     ovNames = fieldnames(BATCH_RUN.overrides);
     for iOv = 1:numel(ovNames)
@@ -99,8 +136,9 @@ if ~isempty(BATCH_RUN) && isfield(BATCH_RUN, 'overrides')
             error('Batch override "%s" is not a setting defined above this point in run_experiment.m.', ovNames{iOv});
         end
         eval([ovNames{iOv} ' = BATCH_RUN.overrides.(ovNames{iOv});']);
-        fprintf('Batch override: %s = %s\n', ovNames{iOv}, mat2str(BATCH_RUN.overrides.(ovNames{iOv})));
+        fprintf('Batch override: %s = %s\n', ovNames{iOv}, fmt_override(BATCH_RUN.overrides.(ovNames{iOv})));
     end
+    batchOverrideNames = ovNames;
     clear ovNames iOv
 end
 
@@ -135,7 +173,8 @@ allAiConfig = struct( ...
 % alongside the probe, {'WaveGauge'} for the gauge alone.
 % NOTE: every channel in the task shares HOTWIRE_FS. At 4 kHz the gauge is
 % heavily oversampled (waves are a few Hz) -- harmless, just a bigger file.
-ENABLED_AI = {'Hotwire'};%'Hotwire','Hotwire', 'RefProbe', 'WaveGauge'
+% ENABLED_AI itself is set above the batch-override block (so a wrapper can
+% override it); the groups it may contain are the ones documented just above.
 aiConfig   = allAiConfig(ismember({allAiConfig.group}, ENABLED_AI));
 aiNames    = {aiConfig.name};
 aiGroups   = {aiConfig.group};
@@ -151,28 +190,70 @@ if ~isempty(badGroups)
     error('ENABLED_AI contains unknown group(s): %s', strjoin(badGroups, ', '));
 end
 
-DEV_CAMERAS = "Dev3";   % <-- confirm this matches NI MAX for the PCI-6621
-% Pulse width IS the exposure: these cameras are set to trigger on HIGH level,
-% so they expose for as long as the line is high. At 50 Hz (20000us period),
-% dutyCycle = exposure_us / 20000 -- so 0.025 = 500us and 0.035 = 700us.
+% A wave gauge run with no still-water window has nothing to zero eta against,
+% so the gauge's offset drift stays in the data. Raise the baseline rather than
+% let that happen silently -- but never argue with an explicit batch override.
+if hasWave && PRE_WIND_BASELINE_T < WG_BASELINE_MIN_T
+    if ismember('PRE_WIND_BASELINE_T', batchOverrideNames)
+        warning(['WaveGauge is enabled but PRE_WIND_BASELINE_T was overridden to %g s ' ...
+                 '(< %g s): eta will keep the calibration''s own zero, including its drift.'], ...
+                 PRE_WIND_BASELINE_T, WG_BASELINE_MIN_T);
+    else
+        fprintf('WaveGauge enabled: raising PRE_WIND_BASELINE_T %g -> %g s for still-water zeroing.\n', ...
+            PRE_WIND_BASELINE_T, WG_BASELINE_MIN_T);
+        PRE_WIND_BASELINE_T = WG_BASELINE_MIN_T;
+    end
+end
+
+% DEV_CAMERAS, ENABLED_CAMERAS, CAM_FS and CAM_EXPOSURE_US are all set above
+% the batch-override block, so a wrapper script can change them.
+% Pulse width IS the exposure: these cameras trigger on HIGH level, so they
+% expose for as long as the line is high -- so exposure = dutyCycle/freq, and
+% dutyCycle is DERIVED from CAM_EXPOSURE_US below rather than hard-coded, so
+% that changing CAM_FS does not silently change every exposure with it.
 % IR ignores pulse width (its exposure is set in its own software), so its
-% 0.5 is arbitrary.
+% 10000us entry is arbitrary.
 %
 % ctr3 DRIVES TWO CAMERAS: the Mono side camera and the Mono under-tank
 % cross-view camera are wired to the same counter output, so they necessarily
-% share this signal -- same 50 Hz, same 700us exposure. Changing 'Mono' below
+% share this signal -- same rate, same 700us exposure. Changing 'Mono' below
 % changes both. To give the under-tank camera its own exposure it would need
 % a separate counter (ctr0 is free) and its own entry here.
 % ctr1 (Color) and ctr2 (IR) each drive a single camera.
 allCamConfig = struct( ...
     'name',      {'IR',   'Color',  'Mono'}, ...
     'ctr',       {'ctr2', 'ctr1', 'ctr3'}, ...
-    'freq',      {50,     50,   50}, ...
-    'dutyCycle', {0.5,    0.025, 0.035}, ...   % Color 500us, Mono 700us
+    'freq',      {CAM_FS, CAM_FS, CAM_FS}, ...
+    'dutyCycle', {NaN,    NaN,   NaN}, ...   % derived from CAM_EXPOSURE_US below
     'delay',     {0,      0,    0});
 
 % 'Mono' here means the ctr3 line, i.e. Mono side + Mono under-tank.
-ENABLED_CAMERAS = {};%{'IR','Color','Mono'};   % <-- edit to trigger only certain cameras, e.g. {'IR'} or {} for none
+% duty = exposure * rate. This errors rather than clipping: duty >= 1 means the
+% requested exposure is longer than the frame period, which would leave the
+% trigger line permanently high -- no usable edge at all.
+for iCam = 1:numel(allCamConfig)
+    camName = allCamConfig(iCam).name;
+    if ~isfield(CAM_EXPOSURE_US, camName)
+        error('CAM_EXPOSURE_US has no field "%s" -- every camera in allCamConfig needs one.', camName);
+    end
+    expUs = CAM_EXPOSURE_US.(camName);
+    duty  = expUs * CAM_FS / 1e6;
+    if ~(duty > 0 && duty < 1)
+        error(['%s: exposure %g us at %g Hz gives duty %.4f, which is not in (0,1). ' ...
+               'The frame period is %g us -- lower CAM_EXPOSURE_US.%s or CAM_FS.'], ...
+               camName, expUs, CAM_FS, duty, 1e6/CAM_FS, camName);
+    end
+    allCamConfig(iCam).dutyCycle = duty;
+end
+clear iCam camName expUs duty
+
+% A typo in ENABLED_CAMERAS used to silently trigger nothing. Now that a
+% wrapper can override it, catch it -- same treatment as ENABLED_AI gets above.
+badCams = setdiff(ENABLED_CAMERAS, {allCamConfig.name});
+if ~isempty(badCams)
+    error('ENABLED_CAMERAS contains unknown camera(s): %s', strjoin(badCams, ', '));
+end
+
 camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 
 % probe4.txt holds BOTH probes used below: the tri-axial hot-wire (55P95,
@@ -182,6 +263,11 @@ camConfig = allCamConfig(ismember({allCamConfig.name}, ENABLED_CAMERAS));
 CAL_FILE = 'D:\Chris\osbl-turbulent-mixing\experiment\data\260909\probe4.txt'; % <-- this probe's cal/header
 CTA_DIR  = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\CTA';     % parse_calibration + convert_E2U_fn + parse_probe_section
 addpath(CTA_DIR);
+
+% inferno lives with the CSIG code -- same lookup as
+% Wave_Gauge/plotting/plot_wave_ramp_run.m, used by the eta spectrogram below.
+SLOPE_UTIL = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\Slope_Gauge\util';
+if ~exist('inferno', 'file') && exist(SLOPE_UTIL, 'dir'), addpath(SLOPE_UTIL); end
 
 % Wave gauge volts -> cm, from a STATIC calibration (still water, fan off)
 % made by Wave_Gauge/run_wavegauge_calibration.m. Empty = use the newest
@@ -470,6 +556,7 @@ end
 E_wg = [];
 eta = [];
 etaUnit = '';
+etaZeroOffset = 0;
 if hasWave
     E_wg = data{:, strcmp(aiNames, 'WaveGauge')};
     if ~isempty(wgCal)
@@ -492,6 +579,26 @@ if hasWave
     if any(E_wg <= wgRange(1) + 0.05 | E_wg >= wgRange(2) - 0.05)
         warning('%.2f%% of wave gauge samples are at the +-%g V input limit.', ...
             100*nnz(E_wg <= wgRange(1) + 0.05 | E_wg >= wgRange(2) - 0.05)/numel(E_wg), wgRange(2));
+    end
+
+    % Still-water zeroing. The gauge's offset is the one error term big enough
+    % to matter (0.2 cm between calibrations 1.5 h apart, drifting at
+    % 0.007 cm/min) and it cancels exactly against a pre-wind mean. The shift
+    % is SAVED, not just applied, so absolute elevation on the calibration's
+    % own datum is recoverable as eta + etaZeroOffset.
+    etaZeroOffset = 0;
+    baseIdx = hwT_wind < 0;
+    if WG_ZERO_FROM_BASELINE && nnz(baseIdx) > 0
+        etaZeroOffset = mean(eta(baseIdx));
+        eta = eta - etaZeroOffset;
+        fprintf('Wave gauge zeroed on %.1f s of still water (%d samples): offset %+.4f %s removed.\n', ...
+            hwT_wind(find(baseIdx, 1, 'last')) - hwT_wind(1), nnz(baseIdx), etaZeroOffset, etaUnit);
+        % Baseline scatter is the floor on how well that zero is known.
+        fprintf('  baseline std %.4f %s (that is the uncertainty on the new zero).\n', ...
+            std(eta(baseIdx)), etaUnit);
+    elseif WG_ZERO_FROM_BASELINE
+        warning(['No pre-wind samples, so eta keeps the calibration''s own zero ' ...
+                 'and carries its offset drift. Set PRE_WIND_BASELINE_T > 0.']);
     end
 end
 
@@ -537,12 +644,13 @@ runConfig = struct( ...
     'HOTWIRE_FS', HOTWIRE_FS, 'DELAY_BEFORE_TRIG', DELAY_BEFORE_TRIG, ...
     'PRE_WIND_BASELINE_T', PRE_WIND_BASELINE_T, ...
     'ENABLED_AI', {ENABLED_AI}, 'ENABLED_CAMERAS', {ENABLED_CAMERAS}, ...
-    'WG_CAL_FILE', WG_CAL_FILE, ...
+    'CAM_FS', CAM_FS, 'CAM_EXPOSURE_US', CAM_EXPOSURE_US, ...
+    'WG_CAL_FILE', WG_CAL_FILE, 'WG_ZERO_FROM_BASELINE', WG_ZERO_FROM_BASELINE, ...
     'fanTF', []);
 if FAN_RAMP_LINEAR_U, runConfig.fanTF = tf; end
 saveVars = {'data', 'hwT', 'hwT_t0', 'hwT_wind', 'CAL_FILE', ...
             'E1', 'E2', 'E3', 'U', 'V', 'W', 'E_ref', 'U_ref', ...
-            'E_wg', 'eta', 'etaUnit', 'wgCal', 'WG_CAL_FILE', ...
+            'E_wg', 'eta', 'etaUnit', 'etaZeroOffset', 'wgCal', 'WG_CAL_FILE', ...
             'aiConfig', 'aiNames', 'aiGroups', 'sentT', 'sentV', ...
             'fanStartElapsed', 'hwStartElapsed', 'hwStopElapsed', ...
             'camStartElapsed', 'camStopElapsed', 'camDelayActual', 'camStartJitter', ...
@@ -586,12 +694,12 @@ plot_experiment_signals('actual', ...
 % (No hwT_wind=hwT here: that overwrote the wind clock before the save, so
 % saved files had hwT_wind ~0.1 s off, and it would hide any pre-wind
 % baseline. hwT_wind is already 0 = wind start from the read-back above.)
-% The wave gauge contributes two rows when calibrated (raw volts, then eta)
-% and one when not -- uncalibrated, eta IS the voltage, so a second row would
-% just repeat the first. Raw volts get their own row rather than a second y
-% axis on the eta row: the calibration is a cubic, so volts and cm are not a
-% linear rescale of each other and a twin axis would imply they are.
-nSub = 2*double(hasHotwire) + 2*double(hasRef) + double(hasWave)*(1 + double(~isempty(wgCal)));
+% The wave gauge contributes a spectrogram row plus an eta row, and a raw-volts
+% row when calibrated (uncalibrated, eta IS the voltage, so that row would just
+% repeat the eta row). Raw volts get their own row rather than a second y axis
+% on the eta row: the calibration is a cubic, so volts and cm are not a linear
+% rescale of each other and a twin axis would imply they are.
+nSub = 2*double(hasHotwire) + 2*double(hasRef) + double(hasWave)*(2 + double(~isempty(wgCal)));
 if nSub > 0
     figure;
     iSub = 0;
@@ -659,6 +767,57 @@ if nSub > 0
         legend('\eta');
         title(sprintf('Wave gauge surface elevation (%s)', etaUnit));
         grid on;
+
+        % omega-vs-t spectrogram, same form as the tile in
+        % Wave_Gauge/plotting/plot_wave_ramp_run.m: angular frequency on y,
+        % log10 of the one-sided PSD, inferno. Shows the peak marching down in
+        % frequency as the waves grow through the ramp.
+        iSub = iSub + 1;
+        axSpec = subplot(nSub,1,iSub);
+        WG_SPEC_WIN    = 4;    % s, window length
+        WG_SPEC_F_MAX  = 10;   % Hz, top of the plotted band
+        % Colour range, in DECADES of S_eta below the loudest bin in the band --
+        % same units and default as Wave_Gauge/plotting/plot_wave_ramp_run.m.
+        % Without it the scale stretches to the pre-wind noise floor ~11 decades
+        % down, which compresses the wave field into the top few colours and
+        % promotes the constant ~7.2 Hz instrumental line into a feature.
+        WG_SPEC_DYN_DECADES = 6;
+        nWin = round(WG_SPEC_WIN * HOTWIRE_FS);
+        % 4th output is the one-sided PSD (etaUnit^2/Hz); the 1st output |s|^2
+        % would be raw FFT power with no physical units.
+        [~, fS, tS, pS] = spectrogram(detrend(eta), hann(nWin), round(nWin/2), [], HOTWIRE_FS);
+        % S(omega) = S(f)/(2 pi) keeps the variance under the curve unchanged
+        % when the abscissa is stretched by 2 pi.
+        specLog = log10(pS/(2*pi) + eps);
+        imagesc(tS + hwT_wind(1), 2*pi*fS, specLog);
+        set(gca, 'YDir', 'normal');
+        colormap(axSpec, pick_wg_cmap());
+        % Max over the plotted band only, so an out-of-view high-frequency bin
+        % cannot set the scale for the band you are looking at.
+        topLog = max(max(specLog(fS <= WG_SPEC_F_MAX, :)));
+        clim([topLog - WG_SPEC_DYN_DECADES, topLog]);
+        cb = colorbar;
+        cb.Label.String = sprintf('log_{10} S_\\eta(\\omega)  (%s^2 s/rad)', etaUnit);
+        ylim([0 2*pi*WG_SPEC_F_MAX]);
+        xlabel('Time since wind start (s)');
+        ylabel('\omega (rad/s)');
+        title(sprintf('S_\\eta(\\omega, t) (%g s windows)', WG_SPEC_WIN));
+    end
+
+    % The spectrogram's colorbar steals width from its axes, so without this
+    % its time axis sits narrower than the line plots above it and the columns
+    % stop lining up. Same fix as plot_wave_ramp_run.m: give every other axes
+    % an invisible colorbar, then link the time axes so zooming one zooms all.
+    if hasWave
+        axAll = flipud(findobj(gcf, 'Type', 'axes'));
+        for iA = 1:numel(axAll)
+            if isempty(axAll(iA).Colorbar)
+                cbHidden = colorbar(axAll(iA)); cbHidden.Visible = 'off';
+            end
+        end
+        linkaxes(axAll, 'x');
+        xlim(axAll(1), [hwT_wind(1), hwT_wind(end)]);
+        clear axAll iA cbHidden
     end
 end
 
@@ -693,6 +852,13 @@ end
 
 
 %% Local functions
+function cm = pick_wg_cmap()
+% inferno when Slope_Gauge/util is on the path (added near CAL_FILE above),
+% parula otherwise -- same fallback as the Wave_Gauge plotting functions, so a
+% missing path costs you the colormap, not the figure.
+    if exist('inferno', 'file'), cm = inferno; else, cm = parula; end
+end
+
 function name = next_repeat_name(base)
 % Next free repeat file for a run name: base_r1.mat, base_r2.mat, ... in the
 % current folder (where save() writes). A plain base.mat from before this
@@ -742,4 +908,33 @@ function [started, startElapsed] = maybeStartCameras(started, startElapsed, t0, 
         started = true;
         startElapsed = toc(t0);
     end
+end
+
+function s = fmt_override(v)
+% Render an override value for the "Batch override:" log line. mat2str covers
+% numeric, logical and char, but ERRORS on the cell arrays (ENABLED_AI,
+% ENABLED_CAMERAS) and structs (CAM_EXPOSURE_US) that became overridable when
+% they moved above the override block -- and an error here would kill the run
+% while merely trying to log what it was about to do.
+if iscell(v)
+    if isempty(v)
+        s = '{}';
+    elseif all(cellfun(@(x) ischar(x) || isstring(x), v))
+        quoted = cellfun(@(x) ['''' char(x) ''''], v, 'UniformOutput', false);
+        s = ['{' strjoin(quoted, ', ') '}'];
+    else
+        s = sprintf('<%dx%d cell>', size(v,1), size(v,2));
+    end
+elseif isstruct(v) && isscalar(v)
+    f = fieldnames(v);
+    parts = cell(1, numel(f));
+    for i = 1:numel(f)
+        parts{i} = sprintf('%s=%s', f{i}, fmt_override(v.(f{i})));
+    end
+    s = ['struct(' strjoin(parts, ', ') ')'];
+elseif isstring(v)
+    s = char(strjoin(v, ', '));
+else
+    s = mat2str(v);
+end
 end

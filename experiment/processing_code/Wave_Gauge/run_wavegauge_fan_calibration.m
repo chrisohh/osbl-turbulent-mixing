@@ -44,6 +44,10 @@ DEV_ID      = "Dev4";   % <-- confirm this matches NI MAX for the USB-6451
 DEV_CAMERAS = "Dev3";   % <-- confirm this matches NI MAX for the PCI-6621
 RUN_EXP_DIR = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\Run_exp';
 addpath(RUN_EXP_DIR);   % setup_camera_triggers
+% inferno lives with the CSIG code -- same lookup as
+% Wave_Gauge/plotting/plot_wave_ramp_run.m, used by the spectrogram below.
+SLOPE_UTIL = 'D:\Chris\osbl-turbulent-mixing\experiment\processing_code\Slope_Gauge\util';
+if ~exist('inferno', 'file') && exist(SLOPE_UTIL, 'dir'), addpath(SLOPE_UTIL); end
 RUN_TAG = '';           % optional short label for the saved filename
 
 %% --- Wave gauge ------------------------------------------------------------
@@ -68,6 +72,12 @@ FAN_HOLD_T         = 0;    % s, hold at the top
 FAN_DT             = 0.5;  % s, step interval
 
 PRE_WIND_BASELINE_T = 10;  % s of still-water gauge data before the fan starts (0 to skip)
+% eta is referenced to the mean of that still-water window, which removes the
+% gauge's offset drift (0.007 cm/min measured, 0.2 cm between calibrations 1.5 h
+% apart -- both far larger than anything else in the eta error budget). The
+% offset removed is saved as etaZeroOffset, so absolute elevation on the
+% calibration's own datum is recoverable. false = keep the calibration's zero.
+WG_ZERO_FROM_BASELINE = true;
 POST_WIND_LOG_T     = 0;   % s of gauge data after the fan reaches 0 V (waves decaying)
 
 %% --- Camera (nadir Color) -------------------------------------------------
@@ -297,6 +307,25 @@ if any(clipped)
     warning('%.2f%% of wave gauge samples are at the +-10 V limit.', 100*nnz(clipped)/numel(E_wg));
 end
 
+% Still-water zeroing against the pre-wind baseline. The gauge's offset is the
+% one error term large enough to matter (0.2 cm between calibrations 1.5 h
+% apart, drifting at 0.007 cm/min); referencing eta to the water level measured
+% moments before the fan starts cancels it exactly. The shift is SAVED, so
+% absolute elevation on the calibration's own datum is eta + etaZeroOffset.
+etaZeroOffset = 0;
+baseIdx = hwT_wind < 0;
+if WG_ZERO_FROM_BASELINE && nnz(baseIdx) > 0
+    etaZeroOffset = mean(eta(baseIdx));
+    eta = eta - etaZeroOffset;
+    fprintf('Wave gauge zeroed on %.1f s of still water (%d samples): offset %+.4f %s removed.\n', ...
+        hwT_wind(find(baseIdx, 1, 'last')) - hwT_wind(1), nnz(baseIdx), etaZeroOffset, etaUnit);
+    fprintf('  baseline std %.4f %s (the uncertainty on that new zero).\n', ...
+        std(eta(baseIdx)), etaUnit);
+elseif WG_ZERO_FROM_BASELINE
+    warning(['No pre-wind samples, so eta keeps the calibration''s own zero and ' ...
+             'carries its offset drift. Set PRE_WIND_BASELINE_T > 0.']);
+end
+
 %% --- Frame times --------------------------------------------------------------
 % frameT: wind-clock time of each camera trigger (frame n <-> image n in the
 % camera's saved sequence, assuming the camera saved every trigger).
@@ -368,14 +397,30 @@ ylabel(sprintf('\\eta (%s)', etaUnit)); title('Wave gauge'); grid on;
 
 iSub = iSub + 1; ax(iSub) = subplot(nSub,1,iSub);
 % Frequency content through the ramp -- shows the peak moving as the waves grow.
-winS = 4;   % s
+winS  = 4;    % s
+fMax  = 10;   % Hz, top of the plotted band
+% Colour range, in DECADES of S_eta below the loudest bin in that band -- same
+% units and default as Wave_Gauge/plotting/plot_wave_ramp_run.m. Without it the
+% scale stretches to the pre-wind noise floor ~11 decades down, which squeezes
+% the wave field into the top few colours and promotes the constant ~7.2 Hz
+% instrumental line into an apparent feature.
+dynDec = 6;
 % 4th output is the one-sided PSD (etaUnit^2/Hz); the first output |s|^2
 % would be raw FFT power with no physical units.
 [~, fS, tS, pS] = spectrogram(detrend(eta), hann(round(winS*FS)), round(winS*FS/2), [], FS);
-imagesc(tS + hwT_wind(1), fS, 10*log10(pS + eps)); axis xy;
+% Angular frequency, as in Wave_Gauge/plotting/plot_wave_ramp_run.m.
+% S(omega) = S(f)/(2 pi) keeps the variance under the curve unchanged when the
+% abscissa is stretched by 2 pi.
+specLog = log10(pS/(2*pi) + eps);
+imagesc(tS + hwT_wind(1), 2*pi*fS, specLog); axis xy;
+colormap(ax(iSub), pick_cmap());
+% Max over the plotted band only, so an out-of-view bin cannot set the scale.
+topLog = max(max(specLog(fS <= fMax, :)));
+clim([topLog - dynDec, topLog]);
 cb = colorbar;
-cb.Label.String = sprintf('10 log_{10} S_\\eta(f)  (dB re 1 %s^2/Hz)', etaUnit);
-ylim([0 10]); ylabel('f (Hz)'); title(sprintf('\\eta spectrogram (%g s windows)', winS));
+cb.Label.String = sprintf('log_{10} S_\\eta(\\omega)  (%s^2 s/rad)', etaUnit);
+ylim([0 2*pi*fMax]); ylabel('\omega (rad/s)');
+title(sprintf('S_\\eta(\\omega, t) (%g s windows)', winS));
 shade_camera(camOnT, camOffT);
 
 if logTrig
@@ -385,6 +430,15 @@ if logTrig
     ylabel('Trigger (V)'); title('Recorded camera trigger (red = detected frames)'); grid on;
 end
 xlabel('Time since wind start (s)');
+% The spectrogram's colorbar steals width from its axes, so the line plots above
+% it would otherwise be wider and the columns would not line up. Same fix as
+% plot_wave_ramp_run.m: an invisible colorbar of the same width on every other
+% axes.
+for iA = 1:numel(ax)
+    if isgraphics(ax(iA)) && isempty(ax(iA).Colorbar)
+        cbHidden = colorbar(ax(iA)); cbHidden.Visible = 'off';
+    end
+end
 linkaxes(ax, 'x');
 xlim(ax(1), [hwT_wind(1), hwT_wind(end)]);
 
@@ -405,8 +459,9 @@ runConfig = struct( ...
     'PRE_WIND_BASELINE_T', PRE_WIND_BASELINE_T, 'POST_WIND_LOG_T', POST_WIND_LOG_T, ...
     'USE_CAMERA', USE_CAMERA, 'ENABLED_CAMERAS', {ENABLED_CAMERAS}, ...
     'DELAY_BEFORE_TRIG', DELAY_BEFORE_TRIG, 'CAM_TRIG_CHAN', CAM_TRIG_CHAN, ...
-    'CAM_TRIG_THRESH', CAM_TRIG_THRESH, 'fanTF', fanTF);
-saveVars = {'data','hwT','hwT_t0','hwT_wind','E_wg','eta','etaUnit','WG_CAL_FILE','wgCal', ...
+    'CAM_TRIG_THRESH', CAM_TRIG_THRESH, ...
+    'WG_ZERO_FROM_BASELINE', WG_ZERO_FROM_BASELINE, 'fanTF', fanTF);
+saveVars = {'data','hwT','hwT_t0','hwT_wind','E_wg','eta','etaUnit','etaZeroOffset','WG_CAL_FILE','wgCal', ...
             'E_trig','frameT','frameSource','etaAtFrame','frameTable', ...
             'sentT','sentV','schedT','schedV','camConfig','camOnT','camOffT', ...
             'fanStartElapsed','hwStartElapsed','hwStopElapsed','runConfig'};
@@ -429,6 +484,13 @@ end
 
 
 %% Local functions
+function cm = pick_cmap()
+% inferno when Slope_Gauge/util is on the path (added at the top), parula
+% otherwise -- same fallback as the Wave_Gauge plotting functions, so a missing
+% path costs you the colormap, not the figure.
+    if exist('inferno', 'file'), cm = inferno; else, cm = parula; end
+end
+
 function cam = wait_until(t0, targetElapsed, cam)
 % Block until toc(t0) reaches targetElapsed, firing any camera start/stop
 % that falls due in the meantime (same idea as run_experiment.m's
