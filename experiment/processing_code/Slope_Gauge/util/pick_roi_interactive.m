@@ -5,9 +5,9 @@ function roi = pick_roi_interactive(img, prior_roi, scale_x, scale_y, title_text
 x_axis = ((1:nx) - nx/2) * scale_x;
 y_axis = ((1:ny) - ny/2) * scale_y;
 
-figure('Name', title_text, 'Position', [100 100 1200 800]);
+hf = figure('Name', title_text, 'Position', [100 100 1200 800]);
 imagesc(x_axis, y_axis, img);
-axis image; set(gca, 'YDir', 'normal');
+axis image;   % YDir reverse: image the same way up as the raw panel (row -> y mapping unchanged)
 hold on;
 
 if ~isempty(prior_roi)
@@ -22,6 +22,7 @@ end
 
 fprintf('Click two opposite corners of the ROI...\n');
 [cx, cy] = ginput(2);
+close(hf);   % don't leave the picker on screen during the processing / export
 
 col_pix = cx / scale_x + nx/2;
 row_pix = cy / scale_y + ny/2;

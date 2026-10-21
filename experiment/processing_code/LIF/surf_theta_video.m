@@ -12,7 +12,7 @@ clear; close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
-raw_root  = 'C:\Users\Administrator\Downloads\';
+raw_root  = 'D:\HLAB_2026\Core';
 cam       = 'Water_Surf';
 run_num   = 95;
 
@@ -27,7 +27,7 @@ sc.offset_mm   = 25;       % plate was this far TOWARD the camera
 sc.n_medium    = 1.33;
 sc.lens_f_mm   = 35;       % <-- CHECK
 
-hw_file = 'C:\Users\Administrator\Downloads\hotwire_20260923_113939.mat';
+hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
 % Hot-wire panel under the images, vertical line at the frame time
@@ -38,6 +38,8 @@ hw_xlim  = [];             % s since wind start; [] = whole record
 downsample = 2;
 
 fo.cmap            = 'bone';    % see lif_surf_figure
+fo.img_xlim        = [-25 22];  % image panels, cm
+fo.img_ylim        = [-22 7];
 fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
 fo.trans_clims     = [0.75 1.05];
 fo.theta_clims     = [0 0.25];
@@ -56,10 +58,12 @@ dy.surf_gap_cm    = 0.4;
 
 zo.frac          = 0.99;   % see lif_z99
 zo.smooth_mm     = dy.smooth_mm;
-zo.surf_gap_cm   = dy.surf_gap_cm;
+zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg_shift aligns the surface,
+                           % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
-zo.bin_cm        = 1;
+zo.bin_cm        = 1;      % sliding window along x for z99(x) (step zo.step_cm)
+zo.step_cm       = 0.25;
 zo.snr_min       = 4;      % no z99 unless theta clears this many sigma of the noise
 zo.tail_cm       = 1;      % integral stops after this much quiet water (see lif_z99)
 bg_frames        = 1:10:100;   % dye-free frames, averaged -> theta = ln(I_bg/I).
@@ -134,6 +138,9 @@ z_surf_all  = nan(nFrames, nx);
 z99_all     = nan(nFrames, 1);              % all-x average, cm below the surface
 z99_x_all   = [];                           % [nFrames x nbin] local z99(x)
 x99_cm      = [];
+z90_all     = nan(nFrames, 1);              % 90% depth (median of bins), cm
+zrms_all    = nan(nFrames, 1);              % RMS dye depth (median of bins), cm
+peak_all    = nan(nFrames, 1);              % max of the all-x theta profile
 
 %% ---------------- Frames ----------------
 tic;
@@ -143,16 +150,17 @@ for i = 1:nFrames
     I = I(1:downsample:end, 1:downsample:end);
 
     [z_front_all(i,:), z_surf_all(i,:)] = lif_dye_front(I, z_cm, mmpp*downsample, dy);
-    [z99_x, jc, z99_all(i), zeta, theta_bar, theta_img, T_img] = ...
+    [z99_x, jc, z99_all(i), zeta, theta_bar, theta_img, T_img, st] = ...
         lif_z99(I, z_cm, z_surf_all(i,:), z_front_all(i,:), mmpp*downsample, zo);
     if isempty(z99_x_all), z99_x_all = nan(nFrames, numel(jc)); x99_cm = x_cm(jc); end
     z99_x_all(i,:) = z99_x;
+    z90_all(i) = st.z90;  zrms_all(i) = st.zrms;  peak_all(i) = st.peak;
 
     if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
     lif_surf_update(h, L, theta_img, x_cm, z_front_all(i,:), z_surf_all(i,:), ...
         z99_x, jc, zeta, theta_bar, z99_all(i), ...
         sprintf('CoreView %d, Water\\_SURF, frame %d, $t = %.2f$ s since wind start', ...
-                run_num, n, t_wind(i)), t_wind(i));
+                run_num, n, t_wind(i)), t_wind(i), st);
 
     rgb = print(h.fig, '-RGBImage', '-r0');                 % works with an invisible figure
     if i == 1
@@ -179,6 +187,7 @@ zo.bg_frames = bg_frames;  zo.dark_file = dark_file;
 [p, b] = fileparts(out_file);
 ts_file = fullfile(p, [b '_z99.mat']);
 save(ts_file, 'frames', 't_wind', 'x_cm', 'z99_all', 'z99_x_all', 'x99_cm', ...
+     'z90_all', 'zrms_all', 'peak_all', ...
      'z_front_all', 'z_surf_all', 'depth_all', 'mmpp', 'c0', 'downsample', ...
      'dy', 'zo', 'sc', 'hw_file');
 fprintf('Saved z99 time series to %s\n', ts_file);

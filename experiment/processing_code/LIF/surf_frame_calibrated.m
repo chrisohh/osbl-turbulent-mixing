@@ -14,7 +14,7 @@ clear; close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
-raw_root  = 'C:\Users\Administrator\Downloads\';
+raw_root  = 'D:\HLAB_2026\Core';
 cam       = 'Water_Surf';
 run_num   = 95;     frame     = 1875;
 plate_num = 94;     plate_frm = 1;          % plate files are numbered _01
@@ -27,7 +27,7 @@ sc.offset_mm   = 25;       % plate was this far TOWARD the camera
 sc.n_medium    = 1.33;     % plate in water, viewed through the wall
 sc.lens_f_mm   = 35;       % <-- lens focal length (CHECK); only sets D
 
-hw_file = 'C:\Users\Administrator\Downloads\hotwire_20260923_113939.mat';
+hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
 fs      = 50;
 
 % Hot-wire panel under the images, vertical line at the frame time
@@ -41,6 +41,8 @@ downsample = 2;            % every Nth pixel
 % ~1% (~6 counts), below the ~100-count lighting gradient, so it shows in
 % the theta panel, not the raw one.
 fo.cmap            = 'bone';
+fo.img_xlim        = [-25 22];  % image panels, cm
+fo.img_ylim        = [-22 7];
 fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
 fo.trans_clims     = [0.75 1.05];
 fo.theta_clims     = [0 0.25];      % theta panel, linear: saturates the core, shows the edge
@@ -59,10 +61,12 @@ dy.surf_gap_cm    = 0.4;
 % z99 (see lif_z99): level above which 99% of the dye resides (eq. 3.14)
 zo.frac          = 0.99;
 zo.smooth_mm     = dy.smooth_mm;
-zo.surf_gap_cm   = dy.surf_gap_cm;
+zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg_shift aligns the surface,
+                           % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;      % per-column clear-water fit, used only without bg
 zo.fit_margin_cm = 0.5;    % clear water starts this far below the dye front
-zo.bin_cm        = 1;      % x bin for the local z99(x) (longitudinal view)
+zo.bin_cm        = 1;      % sliding window along x for z99(x) (step zo.step_cm)
+zo.step_cm       = 0.25;
 bg_frame         = 1;      % dye-free Water_SURF frame -> theta = ln(I_bg/I); [] = per-column fit
 dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtracted from I and I_bg; [] = none
 
@@ -110,7 +114,7 @@ depth = z_surf - z_front;
 fprintf('Dye front: depth below surface %.1f cm mean, %.1f..%.1f cm range; threshold %.0f..%.0f counts\n', ...
         mean(depth, 'omitnan'), min(depth), max(depth), min(thr_col), max(thr_col));
 
-[z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, z_surf, z_front, mmpp*downsample, zo);
+[z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, st] = lif_z99(I, z_cm, z_surf, z_front, mmpp*downsample, zo);
 fprintf('z99(x) = %.2f..%.2f cm (mean %.2f) below the surface, %g cm bins; all-x average z99 = %.2f cm\n', ...
         min(z99_x), max(z99_x), mean(z99_x, 'omitnan'), zo.bin_cm, z99);
 
@@ -123,4 +127,4 @@ h = lif_surf_figure(x_cm, z_cm, fo);
 set(h.fig, 'Name', sprintf('CoreView_%d %s frame %d', run_num, cam, frame));
 if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
 lif_surf_update(h, L, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta, theta_bar, z99, ...
-    sprintf('CoreView %d, Water\\_SURF, frame %d, $t = %.2f$ s since wind start', run_num, frame, t_frame), t_frame);
+    sprintf('CoreView %d, Water\\_SURF, frame %d, $t = %.2f$ s since wind start', run_num, frame, t_frame), t_frame, st);

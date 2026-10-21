@@ -1,4 +1,4 @@
-function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta, theta_bar, z99, ttl, t_frame)
+function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta, theta_bar, z99, ttl, t_frame, st)
 %LIF_SURF_UPDATE Fill a lif_surf_figure for one frame.
 %
 %   LIF_SURF_UPDATE(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, ...
@@ -7,7 +7,8 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
 % I / theta_img [ny x nx]; z_front, z_surf [1 x nx]; z99_x, jc from
 % lif_z99; zeta, theta_bar the all-x profile; z99 the all-x value (cm,
 % negative); ttl the figure title (LaTeX); t_frame (s since wind start)
-% moves the vertical line on the hot-wire panel, if the figure has one.
+% moves the vertical line on the hot-wire panel, if the figure has one;
+% st (lif_z99's 8th output) draws the grey surface band and unlit columns.
 %
 % Panels the figure does not have (opts.panels 'theta', opts.show_z99
 % false) come back as empty handles from lif_surf_figure and are skipped,
@@ -37,4 +38,27 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
     end
     h.tt.String  = ttl;
     if nargin >= 13 && ~isempty(h.hwLine), h.hwLine.Value = t_frame; end
+
+    % Grey layers from lif_z99's stats: uniform surface band (band_cm under
+    % the local surface) and the unlit columns
+    if nargin >= 14 && ~isempty(st) && isfield(st, 'band_cm')
+        lit = st.lit(:).';
+        xl  = x_cm(lit);  zt = z_surf(lit);
+        for hb = [h.bdR h.bdT]
+            set(hb, 'XData', [xl fliplr(xl)], 'YData', [zt fliplr(zt - st.band_cm)]);
+        end
+        d  = diff([0 ~lit 0]);  s = find(d == 1);  e = find(d == -1) - 1;   % unlit runs
+        dx = median(diff(x_cm)) / 2;
+        for hu = [h.unR h.unT]
+            yl = get(get(hu, 'Parent'), 'YLim');
+            V = zeros(4*numel(s), 2);  F = zeros(numel(s), 4);
+            for k = 1:numel(s)
+                x0 = x_cm(s(k)) - dx;  x1 = x_cm(e(k)) + dx;
+                V(4*k-3:4*k, :) = [x0 yl(1); x1 yl(1); x1 yl(2); x0 yl(2)];
+                F(k, :) = 4*k-3 : 4*k;
+            end
+            if isempty(s), set(hu, 'Vertices', [NaN NaN], 'Faces', 1);
+            else,          set(hu, 'Vertices', V, 'Faces', F); end
+        end
+    end
 end

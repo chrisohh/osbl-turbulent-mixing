@@ -9,6 +9,11 @@ coreview_num = 95;
 coreview_ref_num = coreview_num;   % still-water reference = frame 1 of the run being processed
 ref_frame    = 1;
 roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%) or a roi struct
+start_frame  = 1000;               % cache build: first and last frame (every 10th)
+end_frame    = 3000;%totalFrames
+preview_only  = false;              % true: slope plot of preview_frame only, nothing written to disk
+preview_frame = start_frame;       % frame shown in preview mode
+show_ref_channels = false;         % true: also show the reference RGB + R/G/B channel figure
 cache_root   = 'D:\HLAB_2026\SlopeGauge';
 raw_root = 'D:\HLAB_2026\Core';
 ref_fileName=  fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_ref_num, coreview_ref_num, ref_frame));
@@ -53,7 +58,8 @@ fprintf('Loading reference image: %s\n', ref_fileName);
 [ref_image, meta_ref] = cisg_load_coreview(ref_fileName);
 [img_height, img_width] = size(ref_image, [1 2]);
 
-% Display reference
+% Display reference (RGB + channels) -- a check of the colour target only
+if show_ref_channels
 figure('Name', 'Reference Image', 'Position', [100 100 1200 800]);
 subplot(2,2,1);
 imshow(ref_image);
@@ -79,6 +85,7 @@ colorbar;
 title('Blue Channel (constant ~128)');
 axis equal tight;
 colormap(gca, 'gray');
+end
 
 fprintf('Reference image loaded: %d x %d\n\n', size(ref_image,1), size(ref_image,2));
 
@@ -113,6 +120,17 @@ setup.valid_mask(setup.roi.row_min:setup.roi.row_max, ...
 % tank coordinates of the ROI (x along-wind, y cross-wind, cm, plate centre = 0)
 roi_centre = [mean([setup.roi.col_min setup.roi.col_max]) mean([setup.roi.row_min setup.roi.row_max])];
 [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal, roi_centre);
+
+%% Preview: slope plot of ONE frame, nothing written to disk
+if preview_only
+    obs_image = cisg_load_coreview(fullfile(obs_folderName, sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_num, preview_frame)));
+    tic;  [Sx_p, Sy_p] = cisg_calculate_slopes(ref_image, obs_image, setup);  t_prev = toc;
+    r = setup.roi;
+    Sx_p = Sx_p(r.row_min:r.row_max, r.col_min:r.col_max);   Sy_p = Sy_p(r.row_min:r.row_max, r.col_min:r.col_max);
+    cisg_plot_frame(figure('Name', 'Slope preview', 'Position', [100 100 1500 900]), obs_image, Sx_p, Sy_p, setup, cal, ...
+        struct('head', sprintf('CoreView %d, frame %d, t = %.2f s, %.1f s', coreview_num, preview_frame, (preview_frame-1)*dt, t_prev)));
+    return;   % nothing below runs: no mkdir, metadata or frame cache
+end
 [X_cm, Y_cm] = cisg_pixel_grid(cal, setup.roi);
 
 %% Process frames — write per-frame ROI-cropped cache (resumable)
@@ -134,8 +152,6 @@ save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
      'coreview_num', 'img_height', 'img_width', 'X_cm', 'Y_cm', 'cal', 'depth');
 fprintf('Wrote metadata: %s\n', fullfile(out_dir, 'metadata.mat'));
 %%
-start_frame = 1101;
-end_frame = 1101;%totalFrames;
 frames_to_process = start_frame:10:end_frame;
 nFrames = length(frames_to_process);
 

@@ -43,10 +43,12 @@ dy.surf_gap_cm    = 0.4;
 
 zo.frac          = 0.99;   % z99, see lif_z99 (paper eq. 3.14)
 zo.smooth_mm     = dy.smooth_mm;
-zo.surf_gap_cm   = dy.surf_gap_cm;
+zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg_shift aligns the surface,
+                           % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
-zo.bin_cm        = 1;      % x bin for the local z99(x)
+zo.bin_cm        = 1;      % sliding window along x for z99(x) (step zo.step_cm)
+zo.step_cm       = 0.25;
 bg_frame         = 1;      % dye-free Water_SURF frame -> theta = ln(I_bg/I); [] = per-column fit
 
 hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';

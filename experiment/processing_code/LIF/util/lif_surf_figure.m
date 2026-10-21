@@ -36,6 +36,7 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
                  'profile_xlim', [-0.01 0.3], 'profile_zlim', [-15 0], ...
                  'fig_pos', [40 40 2000 650], 'visible', 'on', ...
                  'left', 'transmission', 'trans_clims', [0.75 1.05], 'hw', [], ...
+                 'img_xlim', [], 'img_ylim', [], ...
                  'panels', 'all', 'show_z99', true);
     if nargin < 3, opts = struct(); end
     for f = fieldnames(def).'
@@ -53,7 +54,7 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     tl     = tiledlayout(h.fig, 1 + 2*has_hw, ncol, 'TileSpacing', 'compact', 'Padding', 'compact');
     img_rows = 1 + has_hw;                             % images get 2/3 of the height with hw
 
-    [h.axR, h.imR, h.sfR, h.z9R] = deal(gobjects(0));
+    [h.axR, h.imR, h.sfR, h.z9R, h.bdR, h.unR, h.bdT, h.unT] = deal(gobjects(0));
     [h.axP, h.prP, h.z9P, h.bandP, h.ttP] = deal(gobjects(0));
 
     % 1. transmission I/I_bg (or raw counts)
@@ -71,7 +72,8 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
             cb.Label.String = 'counts';
             title(h.axR, 'raw', 'Interpreter', 'latex');
         end
-        [h.sfR, h.z9R] = overlays(h.axR, x_cm, nx, c99, opts.show_z99);
+        [h.sfR, h.z9R, h.bdR, h.unR] = overlays(h.axR, x_cm, nx, c99, opts.show_z99, ...
+                                                strcmp(opts.left, 'transmission'));
     end
 
     % 2. theta -- full width when it is the only image
@@ -89,7 +91,7 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     end
     cb = colorbar(h.axT); cb.Label.Interpreter = 'latex';
     cb.Label.String = '$\theta = \ln(I_{\rm bg}/I)$';
-    [h.sfT, h.z9T] = overlays(h.axT, x_cm, nx, c99, opts.show_z99);
+    [h.sfT, h.z9T, h.bdT, h.unT] = overlays(h.axT, x_cm, nx, c99, opts.show_z99, true);
     title(h.axT, '$\theta$ (dye concentration)', 'Interpreter', 'latex');
     if opts.show_z99
         legend(h.axT, [h.sfT h.z9T], {'surface', '$z_{99}(x)$'}, ...
@@ -100,6 +102,11 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
 
     for ax = [h.axR h.axT]
         axis(ax, 'image'); set(ax, 'YDir', 'normal');
+        if ax == h.axT || strcmp(opts.left, 'transmission')
+            set(ax, 'Color', [0.78 0.78 0.78]);   % air above the surface (NaN) shows grey
+        end
+        if ~isempty(opts.img_xlim), xlim(ax, opts.img_xlim); end
+        if ~isempty(opts.img_ylim), ylim(ax, opts.img_ylim); end
         xlabel(ax, '$x$ (cm)', 'Interpreter', 'latex');
         ylabel(ax, '$z$ (cm, 0 = frame-1 water level)', 'Interpreter', 'latex');
         set(ax, 'FontSize', 12, 'FontName', 'times');
@@ -146,8 +153,17 @@ function h = lif_surf_figure(x_cm, z_cm, opts)
     h.tt = title(tl, '', 'Interpreter', 'latex', 'FontSize', 15);
 end
 
-function [hs, h9] = overlays(ax, x_cm, nx, c99, show_z99)
+function [hs, h9, hb, hu] = overlays(ax, x_cm, nx, c99, show_z99, grey)
+    % grey layer (drawn first, under the lines) over the unlit columns.  The
+    % air above the surface is grey through the axes colour (NaN pixels).
     hold(ax, 'on');
+    [hb, hu] = deal(gobjects(0));
+    if grey
+        g  = [0.78 0.78 0.78];
+        % (no surface-band layer: only the air is grey, by request; the
+        % band is still left out of the z99 integral in lif_z99)
+        hu = patch(ax, NaN, NaN, g, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    end
     hs = plot(ax, x_cm, nan(1, nx), 'c--', 'LineWidth', 1);
     h9 = gobjects(0);
     if show_z99

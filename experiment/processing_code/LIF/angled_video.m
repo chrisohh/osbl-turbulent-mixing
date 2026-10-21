@@ -11,7 +11,7 @@ clear; close all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
-raw_root  = 'C:\Users\Administrator\Downloads\';
+raw_root  = 'D:\HLAB_2026\Core';
 cam       = 'Water_PIV';
 run_num   = 95;
 
@@ -19,7 +19,7 @@ frame_start = 1432;
 frame_step  = 10;          % every Nth acquired frame
 frame_end   = 1900;        % [] = last available
 
-hw_file = 'C:\Users\Administrator\Downloads\hotwire_20260923_113939.mat';
+hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
                            % camDelay only (no velocity panel); [] = time from camera start
 fs      = 50;
 

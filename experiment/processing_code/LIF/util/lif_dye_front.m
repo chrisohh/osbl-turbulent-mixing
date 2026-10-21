@@ -22,7 +22,10 @@ function [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, dx_mm, opts)
 %      opts.dye_thr given: Is >= dye_thr (fixed counts).
 %
 % opts fields (defaults): dye_frac 0.9, dye_thr [], smooth_mm 1.5,
-%   surf_window_cm [4 10], surf_gap_cm 0.4, top_band_cm 0.8, surf_median_cm 0.6
+%   surf_window_cm [4 10], surf_gap_cm 0.4, top_band_cm 0.8, surf_median_cm 0.6,
+%   surf_above_mm 8, surf_contrast 0.15 (surface row must be this fraction
+%   darker than the air surf_above_mm above it), surf_jump_cm 0.5 (points
+%   further than this from the 2 cm running median are refilled)
 %
 % Outputs (all [1 x nx], cm / counts):
 %   z_front - front height (NaN where the column is clear under the gap)
@@ -31,7 +34,8 @@ function [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, dx_mm, opts)
 
     def = struct('dye_frac', 0.9, 'dye_thr', [], 'smooth_mm', 1.5, ...
                  'surf_window_cm', [4 10], 'surf_gap_cm', 0.4, ...
-                 'top_band_cm', 0.8, 'surf_median_cm', 0.6);
+                 'top_band_cm', 0.8, 'surf_median_cm', 0.6, ...
+                 'surf_above_mm', 8, 'surf_contrast', 0.15, 'surf_jump_cm', 0.5);
     if nargin < 4, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -42,7 +46,24 @@ function [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, dx_mm, opts)
 
     rows   = find(z_cm >= opts.surf_window_cm(1) & z_cm <= opts.surf_window_cm(2));
     [~, k] = min(Is(rows, :), [], 1);
-    z_surf = movmedian(z_cm(rows(k)), round(10*opts.surf_median_cm / dx_mm));
+    r      = rows(k);
+    zs     = z_cm(r);
+    % Accept the darkest row only where the air above it is clearly
+    % brighter: the surface line under the lit background.  Where the air
+    % itself is dark (outside the lit panel, CoreView 95 x > ~22 cm) the
+    % darkest row can sit anywhere in the air.  Rejected columns, and points
+    % that jump away from their neighbours, are filled along x.
+    na   = max(1, round(opts.surf_above_mm / dx_mm));
+    ra   = max(r - na, 1);
+    Iabv = Is(sub2ind(size(Is), ra, 1:nx));
+    Ilin = Is(sub2ind(size(Is), r,  1:nx));
+    zs((Iabv - Ilin) ./ max(Iabv, 1) < opts.surf_contrast) = NaN;
+    wm = max(3, round(20 / dx_mm));                    % 2 cm reference median
+    zm = movmedian(zs, wm, 'omitnan');
+    zs(abs(zs - zm) > opts.surf_jump_cm) = NaN;
+    if all(isnan(zs)), zs = z_cm(r); end               % nothing passed: old behaviour
+    zs = fillmissing(zs, 'linear', 'EndValues', 'nearest');
+    z_surf = movmedian(zs, round(10*opts.surf_median_cm / dx_mm));
 
     below   = z_cm(:) < z_surf - opts.surf_gap_cm;   % [ny x nx]
     n_top   = max(1, round(10*opts.top_band_cm / dx_mm));   % band for I_dye
