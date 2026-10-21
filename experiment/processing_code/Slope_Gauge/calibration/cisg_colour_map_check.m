@@ -73,7 +73,7 @@ fprintf('   colour_norm none: rms Sx %.4f Sy %.4f; mask %.1f%%\n', rms(rg(Sx_0),
         rms(rg(Sy_0), 'all', 'omitnan'), 100*mean(isnan(rg(Sx_0)), 'all'));
 
 %% ---- figure ----
-q = 4;  d4 = @(A) A(1:q:end, 1:q:end);
+q = 4;  d4 = @(A) A(1:q:end, 1:q:end, :);
 Cs = imgaussfilt(single(d4(ref)), 6/q);
 Cn = cat(3, Cs(:,:,1) ./ max(sum(Cs, 3), 1), Cs(:,:,2) ./ max(sum(Cs, 3), 1));
 [a, b] = gradient(Cn(:,:,1));  [c, d] = gradient(Cn(:,:,2));
