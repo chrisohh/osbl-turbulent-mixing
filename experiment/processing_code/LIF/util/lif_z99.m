@@ -41,6 +41,10 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
 %   bin_cm 1 (x bin width for z99_x)
 %   dark [] (dark frame, same size as I: subtracted from I and bg before the
 %   ratio -- any camera offset biases I/I_bg, most in the dark lower image)
+%   bg_shift true (with bg: move each bg column so its surface sits on this
+%   frame's -- the flat bg otherwise puts air under wave crests),
+%   bg_search_cm 1 (bg surface search, +/- around this frame's surface),
+%   surf_median_cm 0.6 (running median of the bg surface along x)
 %
 % Outputs:
 %   z99_x     - [1 x nbin] local z99 (cm, NEGATIVE = below the surface)
@@ -55,7 +59,8 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
 %               exp(-theta_img) when there is no bg
 
     def = struct('frac', 0.99, 'smooth_mm', 1.5, 'surf_gap_cm', 0.4, ...
-                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'dark', []);
+                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'dark', [], ...
+                 'bg_shift', true, 'bg_search_cm', 1, 'surf_median_cm', 0.6);
     if nargin < 6, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -72,12 +77,34 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
         lnB = log(max(imgaussfilt(opts.bg, sig), 1));
     end
 
+    % Background surface alignment.  The bg frame's surface is flat; where
+    % this frame's surface is higher (crests), the bg pixels just under it
+    % are air / the dark surface line, I > I_bg and theta goes negative
+    % ("undyed" white band at the top).  Find the bg surface per column the
+    % same way as lif_dye_front (darkest smoothed row, here within
+    % bg_search_cm of this frame's surface), and shift each bg column so
+    % its surface sits on this frame's.  The shift is a few mm, so the
+    % lighting gradient it also moves is negligible (and normalised below).
+    z = z_cm(:);
+    bg_shift = zeros(1, nx);
+    if ~isempty(opts.bg) && opts.bg_shift
+        zb = nan(1, nx);
+        for j = 1:nx
+            r = find(abs(z - z_surf(j)) <= opts.bg_search_cm);
+            if isempty(r), continue; end
+            [~, k] = min(lnB(r, j));
+            zb(j) = z(r(k));
+        end
+        zb = movmedian(zb, max(1, round(10*opts.surf_median_cm / dx_mm)), 'omitnan');
+        bg_shift = z_surf - zb;
+        bg_shift(isnan(bg_shift)) = 0;
+    end
+
     dz   = abs(z_cm(2) - z_cm(1));
     zeta = (0 : -dz : (min(z_cm) - max(z_surf))).';
     TH   = nan(numel(zeta), nx);
     theta_img = nan(size(I));
     T_img     = nan(size(I));
-    z    = z_cm(:);
 
     for j = 1:nx
         if isnan(z_surf(j)), continue; end
@@ -90,9 +117,14 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img] = lif_z99(I, z_cm, 
             lnC = polyval(p, z, [], mu);
         else
             lnC = lnB(:, j);
+            Bj  = opts.bg(:, j);
+            if bg_shift(j) ~= 0                        % bg surface onto this frame's
+                lnC = fillmissing(interp1(z, lnC, z - bg_shift(j), 'linear'), 'nearest');
+                Bj  = fillmissing(interp1(z, Bj,  z - bg_shift(j), 'linear'), 'nearest');
+            end
         end
         th = lnC - lnI(:, j);
-        if ~isempty(opts.bg), Tc = I(:, j) ./ max(opts.bg(:, j), 1); end
+        if ~isempty(opts.bg), Tc = I(:, j) ./ max(Bj, 1); end
         if ~isempty(opts.bg) && opts.bg_normalize
             % Lighting/exposure drift between bg and frame (CoreView 95:
             % frame 1875 is ~1.5% darker than frame 1 even in deep clear

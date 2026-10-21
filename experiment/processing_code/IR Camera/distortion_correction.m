@@ -31,7 +31,7 @@ data = zeros(height, width, numFrames, 'single');
 frameToPlot=1268;
 sampleFrame=readFrame(v, frameToPlot);
 data(:,:,frameToPlot)=sampleFrame;
->>>>>>> Stashed changes
+
 figure;
 imagesc(Frame)
 
@@ -65,8 +65,7 @@ axis equal tight;
 mask = img_avg < 18.7;
 
 %%
-<<<<<<< Updated upstream
-=======
+
 img_sum=zeros(size(data(:,:,1)));
 for i = 1:10
     img_sum = img_sum + data(:,:,i);
@@ -82,7 +81,7 @@ f1=data(:,:,frameToPlot);
 mask = f1 < maskThresh;%17.8;
 
 Frame=data(:,:,frameToPlot);
->>>>>>> Stashed changes
+
 masked_data=(Frame-img_avg).*mask;
 masked_data(~mask) = NaN;  % Set false regions to NaN
 figure;

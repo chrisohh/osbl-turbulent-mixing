@@ -1,13 +1,17 @@
 %% CISG Main Script - Complete Workflow for CoreView Data
 clear all;
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
+addpath(fullfile(fileparts(mfilename('fullpath')), 'calibration'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'IR Camera', 'calibration'));   % surf_px2world / surf_world2px
 
 %% Setup parameters
-coreview_num = 22;
-coreview_ref_num = 19;%coreview_num
+coreview_num = 95;
+coreview_ref_num = coreview_num;   % still-water reference = frame 1 of the run being processed
+ref_frame    = 1;
+roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%) or a roi struct
 cache_root   = 'D:\HLAB_2026\SlopeGauge';
-raw_root = '\\Airseaserver28\D\HLAB_2026\SlopeGauge';
-ref_fileName=  fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_01.raw', coreview_ref_num,coreview_ref_num));
+raw_root = 'D:\HLAB_2026\Core';
+ref_fileName=  fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_ref_num, coreview_ref_num, ref_frame));
 
 obs_folderName = fullfile(raw_root, sprintf('\\CoreView_%d\\Flare 12M125 CCL C1112A00\\', coreview_num));
 fs = 50;  % Hz
@@ -16,9 +20,14 @@ dt = 1/fs;  % 0.02 seconds between frames
 % Physical setup (ADJUST THESE TO YOUR ACTUAL MEASUREMENTS)
 setup = struct();
 % setup.camera_height = 41.7;            % cm above water surface (not used in this code)
-setup.water_depth = 49;              % cm from water surface to pattern (MEASURE THIS)
+setup.water_depth = 48;              % cm from water surface to pattern (MEASURE THIS)
 % setup.pattern_width_cm = 20*2.54;    % 50.8 cm (your printed pattern)
 % setup.pattern_height_cm = 20*2.54;   % 50.8 cm
+setup.use_apparent_depth = true;     % slopes from L_eff and pattern-plane scale (false = legacy water_depth formula)
+setup.colour_map = 'local';          % 'local' (Jacobian inversion, util/cisg_colour_displacement.m) or 'linear' (global gradient fit)
+setup.colour_norm = 'sum';           % 'sum' = R/(R+G+B), G/(R+G+B); 'none'
+setup.colour_sigma = 6;              % px
+setup.max_disp_px = 200;
 setup.n_water = 1.333;
 setup.n_air = 1.000;
 setup.frame_rate = fs;
@@ -32,11 +41,12 @@ fprintf('Water depth: %.1f cm\n', setup.water_depth);
 % fprintf('Pattern size: %.1f x %.1f cm\n\n', setup.pattern_width_cm, setup.pattern_height_cm);
 
 %% Load calibration
-% mat produced from cisg_spatial_calibration.m
-cal = load(strcat(raw_root,'\Processed\CISG_Calibration_CoreView_6.mat'));
+% mat produced from calibration/cisg_plate_calibrate.m (plate at the surface, IR tank frame)
+cisg_cal_path = fullfile(fileparts(mfilename('fullpath')), 'calibration', 'cisg_cal_CoreView_97.mat');
+cal = load(cisg_cal_path);
 cal = cal.cal;
-setup.cm_per_pixel_x = cal.cm_per_pixel_x;
-setup.cm_per_pixel_y = cal.cm_per_pixel_y;
+% local scale at the image centre for now (ROI picker); reset at the ROI centre below
+[setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal);
 %% Load and display reference image
 fprintf('Loading reference image: %s\n', ref_fileName);
 [ref_image, meta_ref] = cisg_load_coreview(ref_fileName);
@@ -71,14 +81,38 @@ colormap(gca, 'gray');
 
 fprintf('Reference image loaded: %d x %d\n\n', size(ref_image,1), size(ref_image,2));
 
+%% Camera height and air-equivalent pattern depth from the colour target
+% (glass t = 19 mm, n_g = 1.52, air gap 76.2 mm: defaults of cisg_apparent_depth; cfg.H_mm overrides H)
+depth_cfg = struct('n_w', setup.n_water, 'fig_path', ...
+    fullfile(fileparts(mfilename('fullpath')), 'calibration', 'cisg_apparent_depth_check.png'));
+depth = cisg_apparent_depth(ref_image, cal, depth_cfg);
+setup.L_eff_cm       = depth.L_eff_mm / 10;
+setup.pattern_scale  = depth.r;            % pattern px size = surface px size * r
+setup.target_cols    = depth.edge_cols;
+fprintf('H = %.1f cm, r = %.3f, L_eff = %.1f cm (slopes); h_est = %.1f cm vs typed water_depth %.1f cm (h_est assumes glass/air-gap values, check only)\n', ...
+        depth.H_mm/10, depth.r, setup.L_eff_cm, depth.h_est_mm/10, setup.water_depth);
+
 %% Pick outer ROI (will be baked into the cache — pick generously)
-setup.roi = pick_roi_interactive(ref_image, [], ...
-    setup.cm_per_pixel_x, setup.cm_per_pixel_y, ...
-    'Outer ROI for slope cache (cannot be expanded without re-extracting)');
+if isstruct(roi_mode)
+    setup.roi = roi_mode;
+elseif strcmp(roi_mode, 'default')
+    setup.roi = struct('row_min', round(0.2*img_height), 'row_max', round(0.8*img_height), ...
+                       'col_min', round(0.2*img_width),  'col_max', round(0.8*img_width));
+else
+    setup.roi = pick_roi_interactive(ref_image, [], ...
+        setup.cm_per_pixel_x, setup.cm_per_pixel_y, ...
+        'Outer ROI for slope cache (cannot be expanded without re-extracting)');
+end
 
 setup.valid_mask = false(img_height, img_width);
 setup.valid_mask(setup.roi.row_min:setup.roi.row_max, ...
                  setup.roi.col_min:setup.roi.col_max) = true;
+
+% Local scale at the ROI centre (what cisg_calculate_slopes uses) and per-pixel
+% tank coordinates of the ROI (x along-wind, y cross-wind, cm, plate centre = 0)
+roi_centre = [mean([setup.roi.col_min setup.roi.col_max]) mean([setup.roi.row_min setup.roi.row_max])];
+[setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal, roi_centre);
+[X_cm, Y_cm] = cisg_pixel_grid(cal, setup.roi);
 
 %% Process frames — write per-frame ROI-cropped cache (resumable)
 raw_pattern = sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_*.raw', coreview_num);
@@ -91,12 +125,12 @@ fprintf('Found %d raw frames in %s\n', totalFrames, obs_folderName);
 
 time = (1:totalFrames - 1) * dt;
 
-out_root = 'D:\HLAB_2026\SlopeGauge';
+out_root = cache_root;
 out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
-     'coreview_num', 'img_height', 'img_width');
+     'coreview_num', 'img_height', 'img_width', 'X_cm', 'Y_cm', 'cal', 'depth');
 fprintf('Wrote metadata: %s\n', fullfile(out_dir, 'metadata.mat'));
 %%
 start_frame = 1101;

@@ -1,3 +1,4 @@
+%% DEPRECATED: ruler-based calibration, superseded by calibration/cisg_plate_calibrate.m (plate, IR tank frame).
 %% CISG_calibration.m - Pixel-to-cm calibration using ruler images
 % clear all;
 
