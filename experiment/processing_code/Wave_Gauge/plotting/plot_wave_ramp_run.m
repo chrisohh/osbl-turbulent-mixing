@@ -14,8 +14,18 @@ function plot_wave_ramp_run(src, win_dur, use_omega, clim_log)
 % use_omega : true (default) = omega in rad/s, S_eta(omega) = S_eta(f)/(2 pi),
 %             consistent with k in rad/m for the later k-omega combination
 %             with the CSIG slopes; false = f in Hz
-% clim_log  : colour limits for log10 S_eta ([] = auto; the CSIG plots fix
-%             theirs with caxis([0 4]))
+% clim_log  : colour limits for log10 S_eta. [] (default) = SPEC_DYN_DECADES
+%             below the loudest bin in the plotted band. Pass explicit limits
+%             to compare runs on one scale (the CSIG plots fix theirs with
+%             caxis([0 4])).
+%
+% Why a default range at all: a wind-wave ramp spans ~11 decades of S_eta
+% between still water and fully developed waves. Letting the scale reach the
+% noise floor compresses the entire wave field into the top few colours and
+% promotes any constant instrumental line (this rig has ~7.2 Hz pickup sitting
+% at the noise floor) into an apparent feature.
+
+SPEC_DYN_DECADES = 6;   % = 60 dB in power; the default colour range
 
 if nargin < 2 || isempty(win_dur),   win_dur = 4;      end
 if nargin < 3 || isempty(use_omega), use_omega = true; end
@@ -32,9 +42,43 @@ else
     d = src; fname = 'wave ramp run';
 end
 
-FS      = d.runConfig.FS;
-logTrig = isfield(d, 'E_trig') && ~isempty(d.E_trig);
-camOnT  = d.camOnT;  camOffT = d.camOffT;
+% Two scripts write wave gauge runs and they name things differently:
+%   run_wavegauge_fan_calibration.m -> runConfig.FS, camOnT/camOffT, E_trig
+%   run_experiment.m (WaveGauge group) -> runConfig.HOTWIRE_FS (the whole AI
+%       task shares one rate), camStartElapsed/camStopElapsed on the t0 clock,
+%       and no teed trigger channel.
+% Accept either rather than making the caller care which script produced the file.
+if isfield(d.runConfig, 'FS')
+    FS = d.runConfig.FS;
+elseif isfield(d.runConfig, 'HOTWIRE_FS')
+    FS = d.runConfig.HOTWIRE_FS;
+else
+    error(['runConfig has neither FS nor HOTWIRE_FS -- is %s a wave gauge run ' ...
+           'saved by run_wavegauge_fan_calibration.m or run_experiment.m?'], fname);
+end
+if ~isfield(d, 'eta') || isempty(d.eta)
+    error('%s has no eta -- the wave gauge was not enabled in that run.', fname);
+end
+
+logTrig = isfield(d, 'E_trig') && ~isempty(d.E_trig) && ...
+          isfield(d, 'frameT') && isfield(d.runConfig, 'CAM_TRIG_THRESH');
+
+if isfield(d, 'camOnT')
+    camOnT = d.camOnT;  camOffT = d.camOffT;
+elseif isfield(d, 'camStartElapsed') && ~isempty(d.camStartElapsed)
+    % run_experiment.m stores these on the master t0 clock; the plot's x axis
+    % is the wind clock, so shift by the same fanStartElapsed it used.
+    camOnT  = d.camStartElapsed - d.fanStartElapsed;
+    camOffT = d.camStopElapsed  - d.fanStartElapsed;
+else
+    camOnT = [];  camOffT = [];
+end
+camOnT = camOnT(:);  camOffT = camOffT(:);
+% A camera window with no recorded end (interrupted run) would make xregion
+% throw; drop any unpaired entry instead.
+nPair   = min(numel(camOnT), numel(camOffT));
+camOnT  = camOnT(1:nPair);  camOffT = camOffT(1:nPair);
+
 F_MAX   = 10;   % Hz, display limit (wire gauge resolution)
 etaU    = d.etaUnit;
 
@@ -80,9 +124,16 @@ else
     cbLab = sprintf('$\\log_{10} S_\\eta(f)$ (%s$^2$/Hz)', etaU);
     ttl   = sprintf('$S_\\eta(f, t)$ (%g s windows)', win_dur);
 end
-imagesc(tS + d.hwT_wind(1), yS, log10(pS + eps));
+specLog = log10(pS + eps);
+imagesc(tS + d.hwT_wind(1), yS, specLog);
 set(gca, 'YDir', 'normal'); axis tight;
-if ~isempty(clim_log), caxis(clim_log); end
+if isempty(clim_log)
+    % Max over the plotted band only, so a bin above yMax cannot set the scale
+    % for the band on screen.
+    topLog   = max(max(specLog(yS <= yMax, :)));
+    clim_log = [topLog - SPEC_DYN_DECADES, topLog];
+end
+clim(clim_log);
 colormap(ax(3), pick_cmap());
 cb = colorbar;
 cb.Label.String = cbLab; cb.Label.Interpreter = 'latex'; cb.Label.FontSize = 16;

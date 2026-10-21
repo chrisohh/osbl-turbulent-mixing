@@ -1,4 +1,4 @@
-% load('C:\Users\asila\OneDrive\Documents\osbl-turbulent-mixing\experiment\processing_code\CT\StratificationVar.mat')
+% load('C:\Users\asila\OneDri30.3ve\Documents\osbl-turbulent-mixing\experiment\processing_code\CT\StratificationVar.mat')
 
 clear; clc;
 %%
@@ -48,9 +48,31 @@ while true
 end
 
 %%
-h0=29.5;%when black box is submerged below the surface
+h0=30.3;%when black box is submerged below the surface
 depth=height-h0;
-save(sprintf('densityProfileData_%s.mat',datestr(now,'yyyymmdd_HHMM')), 'depth', 'voltage');
+defaultName = sprintf('densityProfileData_%s.mat',datestr(now,'yyyymmdd_HHMM'));
+while true
+    resp = input(sprintf('Save as [%s] (Enter to accept, or type a name): ', defaultName), 's');
+    resp = strtrim(resp);
+    if isempty(resp)
+        saveName = defaultName;
+    else
+        saveName = resp;
+    end
+    [~,~,ext] = fileparts(saveName);
+    if isempty(ext)
+        saveName = [saveName '.mat'];
+    end
+    if isfile(saveName)
+        ow = input(sprintf('  %s exists. Overwrite? y/n: ', saveName), 's');
+        if ~strcmpi(strtrim(ow),'y')
+            continue;
+        end
+    end
+    break;
+end
+save(saveName, 'depth', 'voltage');
+fprintf('  saved %s\n', saveName);
 %%
 
 figure;hold on

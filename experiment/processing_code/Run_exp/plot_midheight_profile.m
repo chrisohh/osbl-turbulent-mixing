@@ -126,39 +126,197 @@ title(sprintf('Streamwise velocity vs time and height (%.0f s moving mean)', SMO
     'FontWeight','normal','Color',ink);
 set(gca,'TickDir','out','Box','off','XColor',mutedInk,'YColor',mutedInk,'FontSize',10);
 
-%% 2) Profiles at selected times
-f2 = figure('Color','w','Position',[100 100 560 480]);
-hold on;
+%% 2) Profiles at selected times, with an uncertainty band
+% Notation: height z, snapshot time t, runs r = 1..n(z,t) (runs still ramping),
+% window length Tw = PROFILE_WIN, sampling interval dt = 1/fs.
+%
+% The point value is the mean over runs of each run's window mean:
+%
+%   Ubar_r(z,t) = (1/N) sum_j u_r(t_j),     |t_j - t| <= Tw/2,  N = Tw*fs
+%   Ubar(z,t)   = (1/n) sum_r Ubar_r
+%
+% (a) WITHIN-RUN sampling error -- turbulence, not instrument drift.
+% The samples inside a window are correlated, so the variance of the window
+% mean is NOT sigma_u^2/N. For Tw >> T_int the standard result is
+%
+%   var(Ubar_r) = (2*T_int/Tw) * sigma_u^2  ==  sigma_u^2 / N_eff,
+%   N_eff       = Tw / (2*T_int)
+%
+% with the fluctuation taken about the LOCAL RAMP, not about the window mean
+% (otherwise the ramp's slope is counted as turbulence):
+%
+%   u'(t_j)   = u(t_j) - (a + b*t_j),   a,b least squares inside the window
+%   sigma_u   = std(u')
+%   rho(k)    = autocorrelation of u' at lag k*dt          (xcorr, 'coeff')
+%   T_int     = dt * sum_{k=0}^{K-1} rho(k),  K = first k with rho(k) < 0
+%
+% Truncating the sum at the first zero crossing is the usual guard against the
+% noisy tail of rho. Measured here: T_int ~ 10-50 ms once the air is turbulent
+% (~320 ms before transition, where the signal is still nearly laminar), giving
+% N_eff ~ 30-150 and
+%
+%   s_within(z,t) = (1/n) sum_r sigma_u,r/sqrt(N_eff,r) / sqrt(n)     [eq. A]
+%
+% i.e. the mean per-run standard error, reduced again by averaging n runs.
+% Works out at 0.3-1.2% of U.
+%
+% (b) RUN-TO-RUN error -- repeatability: fan ramp timing, probe reposition,
+% ambient conditions. Per point this is just the sample sd of the run means,
+%
+%   s_pt(z,t) = sqrt( 1/(n-1) * sum_r (Ubar_r - Ubar)^2 )              [eq. B]
+%
+% but with n = 2 that has 1 dof: the relative error of an sd estimate is
+% ~1/sqrt(2*nu), so nu = 1 means ~70% -- it scatters between 0.3% and 8% here
+% purely by luck (see the printed perPoint column). So the scatter is POOLED
+% in RELATIVE form over every (z,t) with n >= 2 and t >= UNC_POOL_TMIN, which
+% is legitimate because sigma scales with U rather than being constant:
+%
+%   c = sqrt( sum_p (n_p - 1) * (s_pt,p / Ubar_p)^2 / sum_p (n_p - 1) )  [eq. C]
+%   s_run(z,t) = c * Ubar(z,t) / sqrt(n)                                 [eq. D]
+%
+% Measured: c = 2.22% with sum(n_p - 1) = 91 dof (so c itself is good to ~7%).
+% This is 3-5x eq. A -- repeatability, not turbulence, sets the band.
+%
+% (c) TOTAL -- and the two do NOT add in quadrature. Each run mean Ubar_r
+% already carries its own within-run sampling error, so the scatter between
+% run means contains it:
+%
+%   s_pt^2 = sigma_repeat^2 + sigma_u^2/N_eff                          [eq. E]
+%
+% Eq. D is therefore already the complete standard error of the point mean,
+% and the band is simply
+%
+%   s(z,t) = s_run(z,t) = c * Ubar / sqrt(n)                           [eq. F]
+%   band   = Ubar(z,t) +- UNC_K * s(z,t)
+%
+% Eq. A survives as (i) a diagnostic -- inverting eq. E separates the 2.22%
+% into its sampling and genuine-repeatability parts, printed below -- and
+% (ii) the fallback for a point with only one run, where no scatter exists.
+%
+% WHAT THE BAND IS NOT: it is not the turbulent fluctuation. sigma_u itself is
+% 4-12% of U here, several times the band, but that is real variation in the
+% flow, not doubt about where the mean lies. Shading sigma_u would answer a
+% different question ("how much does u swing?"); see plot_midheight_stress.m
+% for the turbulence quantities. The band carries 1/sqrt(n), so repeats shrink
+% it -- see the note at the end of this file for how many a difference needs.
+UNC_K     = 1;        % band half-width in sigma (1 = +-1 sigma, 1.96 = 95%)
+UNC_POOL  = true;     % true = pooled run-to-run sd, false = per-point std
+UNC_POOL_TMIN = 15;   % s, exclude the pre-transition start from the pooling
+
 nP = numel(PROFILE_T);
-lineCols = interp1(linspace(0,1,size(ramp,1)), ramp, linspace(0.25,1,nP));   % skip steps too pale to see
-Uprof = nan(numel(z), nP);
+Uprof  = nan(numel(z), nP);   % mean U
+sWin   = nan(numel(z), nP);   % within-run sampling sigma of the point mean
+sRunPt = nan(numel(z), nP);   % per-point run-to-run sd (NaN if only 1 run)
+nUsed  = zeros(numel(z), nP);
 for k = 1:nP
     for i = 1:numel(z)
         % Mean of each run still ramping at this time (full window inside its
         % ramp), then averaged across runs. NaN if every run was cut already.
-        v = nan(numel(runs{i}), 1);
+        v = nan(numel(runs{i}), 1);  se = nan(numel(runs{i}), 1);
         for r = 1:numel(runs{i})
             if PROFILE_T(k) + PROFILE_WIN/2 <= runs{i}(r).tPeak
                 m = abs(runs{i}(r).t - PROFILE_T(k)) <= PROFILE_WIN/2;
-                v(r) = mean(runs{i}(r).U(m));
+                u = runs{i}(r).U(m);  tw = runs{i}(r).t(m);
+                v(r) = mean(u);
+                % Detrend the ramp inside the window first, else its slope
+                % would be counted as turbulence and inflate sigma_u.
+                up = u - polyval(polyfit(tw, u, 1), tw);
+                fs = 1/median(diff(tw));
+                ac = xcorr(up - mean(up), 'coeff');  ac = ac(numel(up):end);
+                iz = find(ac < 0, 1);  if isempty(iz), iz = numel(ac); end
+                Tint = sum(ac(1:iz-1))/fs;
+                se(r) = std(up)/sqrt(max(PROFILE_WIN/(2*Tint), 1));
             end
         end
-        Uprof(i,k) = mean(v, 'omitnan');   % stays NaN -> point left out
+        g = ~isnan(v);
+        if ~any(g), continue; end
+        nUsed(i,k) = sum(g);
+        Uprof(i,k) = mean(v(g));
+        sWin(i,k)  = mean(se(g))/sqrt(sum(g));    % runs average down
+        if sum(g) > 1, sRunPt(i,k) = std(v(g)); end
     end
+end
+
+% Pooled relative run-to-run sd, from every height x time with >= 2 runs.
+w = ~isnan(sRunPt) & repmat(PROFILE_T(:)' >= UNC_POOL_TMIN, numel(z), 1);
+relPool = sqrt(sum((nUsed(w)-1) .* (sRunPt(w)./Uprof(w)).^2) / sum(nUsed(w)-1));
+if UNC_POOL
+    sRun = relPool * Uprof ./ sqrt(nUsed);
+else
+    sRun = sRunPt ./ sqrt(nUsed);     % NaN where only one run -> band = within-run only
+end
+% NOT sqrt(sWin^2 + sRun^2): each run mean already carries its own within-run
+% sampling error, so the scatter BETWEEN run means already contains it --
+% s_pt^2 = sigma_repeat^2 + s_win,1run^2. Adding sWin again double-counts it.
+% sRun is the complete standard error of the point mean; sWin is kept only as
+% a printed diagnostic and as the fallback where no scatter estimate exists.
+sig = sRun;
+sig(isnan(sig)) = sWin(isnan(sig));
+% How much of the pooled scatter is genuine run-to-run, once the within-run
+% sampling noise it contains is removed (small here, but worth seeing).
+relWin1 = mean(sWin(w).*sqrt(nUsed(w))./Uprof(w));       % single-run, relative
+relRepeat = sqrt(max(relPool^2 - relWin1^2, 0));
+fprintf(['Pooled run-to-run sd: %.2f%% of U (%d dof, t >= %g s)\n' ...
+         '  of which within-run sampling %.2f%%, genuine repeatability %.2f%%\n'], ...
+    100*relPool, sum(nUsed(w)-1), UNC_POOL_TMIN, 100*relWin1, 100*relRepeat);
+
+f2 = figure('Color','w','Position',[100 100 560 480]);
+hold on;
+lineCols = interp1(linspace(0,1,size(ramp,1)), ramp, linspace(0.25,1,nP));   % skip steps too pale to see
+% Bands first so every line sits on top of every band.
+for k = 1:nP
+    g = ~isnan(Uprof(:,k)) & ~isnan(sig(:,k));
+    % One patch per contiguous run of valid heights, so a gap isn't bridged.
+    d = [true; diff(find(g)) > 1];
+    gi = find(g);  seg = cumsum(d);
+    for s = 1:max(seg)
+        q = gi(seg == s);
+        if numel(q) < 2, continue; end   % a lone point gets an errorbar below
+        patch([Uprof(q,k) - UNC_K*sig(q,k); flipud(Uprof(q,k) + UNC_K*sig(q,k))], ...
+              [z(q); flipud(z(q))], lineCols(k,:), 'FaceAlpha', 0.28, ...
+              'EdgeColor', 'none', 'HandleVisibility', 'off');
+    end
+end
+for k = 1:nP
     plot(Uprof(:,k), z, '-o', 'Color', lineCols(k,:), 'LineWidth', 2, ...
         'MarkerSize', 7, 'MarkerFaceColor', lineCols(k,:), 'MarkerEdgeColor', 'w', ...
         'DisplayName', sprintf('t = %g s', PROFILE_T(k)));
 end
 hold off;
 xlabel('U (m/s)'); ylabel('Height above water (cm)'); yticks(z);
-title('Velocity profiles during the ramp','FontWeight','normal','Color',ink);
+title(['Velocity profiles during the ramp (shading = \pm' num2str(UNC_K) '\sigma)'], ...
+    'FontWeight','normal','Color',ink);
 legend('Location','eastoutside','Box','off','TextColor',ink);
 grid on; set(gca,'GridColor',[0.85 0.85 0.85],'GridAlpha',1,'TickDir','out','Box','off', ...
     'XColor',mutedInk,'YColor',mutedInk,'FontSize',10);
 
-disp(array2table([z Uprof], 'VariableNames', ['z_above_water_cm', compose('t%gs', PROFILE_T)]));
+%% Printed numbers behind the band
+% nRuns, U, the band half-width, and -- for a sanity check on the pooling --
+% the per-point run-to-run sd that a 1-dof estimate would have given.
+fprintf('\n   z    t   nRuns      U    +-%gsig   within%%  pooled%%  perPoint%%\n', UNC_K);
+for i = 1:numel(z)
+    for k = 1:nP
+        if isnan(Uprof(i,k)), continue; end
+        fprintf('%5.2f %4g %5d %8.3f %8.3f %8.2f %8.2f %9.2f\n', z(i), PROFILE_T(k), ...
+            nUsed(i,k), Uprof(i,k), UNC_K*sig(i,k), 100*sWin(i,k)/Uprof(i,k), ...
+            100*relPool/sqrt(nUsed(i,k)), ...
+            100*sRunPt(i,k)/Uprof(i,k));
+    end
+end
 
 if ~isempty(OUT_PNG)
     exportgraphics(f1, strrep(OUT_PNG, '.png', '_map.png'), 'Resolution', 150);
     exportgraphics(f2, strrep(OUT_PNG, '.png', '_profiles.png'), 'Resolution', 150);
 end
+
+%% How many repeats a given difference needs
+% To call two heights different by dU (absolute) at significance alpha and
+% power 1-beta, with n runs at EACH height and sd sigma = c*U (eq. C):
+%
+%   n >= 2 * (z_{1-alpha/2} + z_{1-beta})^2 * sigma^2 / dU^2
+%      =  15.7 * (c / delta)^2        for 95% / 80% power, delta = dU/U
+%
+% With c = 2.22%: resolving delta = 3.4% (the spread across 7.85-15.85 cm at
+% t = 25 s) needs n ~ 7 per height; delta = 5% needs n ~ 4; delta = 8.6%
+% (t = 65 s) needs n ~ 2, which is why only the late profiles separate
+% cleanly in the outer region. The near-surface heights already have 4-5 runs.
