@@ -22,7 +22,7 @@ obs = cisg_load_coreview(fname(frame));
 
 depth = cisg_apparent_depth(ref, cal);
 setup = struct('n_water', 1.333, 'n_air', 1, 'use_apparent_depth', true, 'water_depth', 48, ...
-               'colour_map', 'local', 'colour_norm', 'sum', 'colour_sigma', 6, 'max_disp_px', 200, ...
+               'colour_map', 'local', 'colour_norm', 'none', 'colour_sigma', 12, 'max_disp_px', 600, ...
                'L_eff_cm', depth.L_eff_mm / 10, 'pattern_scale', depth.r, 'target_cols', depth.edge_cols);
 setup.roi = struct('row_min', round(0.2*H), 'row_max', round(0.8*H), 'col_min', round(0.2*W), 'col_max', round(0.8*W));
 [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal, [mean([setup.roi.col_min setup.roi.col_max]) mean([setup.roi.row_min setup.roi.row_max])]);
@@ -67,9 +67,9 @@ ok = isfinite(rg(Sx_n));
 a1 = rg(Sx_n);  a2 = rg(Sx_l);  b1 = rg(Sy_n);  b2 = rg(Sy_l);
 fprintf('   same pixels (valid local): rms Sx local %.4f linear %.4f; Sy local %.4f linear %.4f; corr Sx %.3f Sy %.3f\n', ...
         rms(a1(ok)), rms(a2(ok)), rms(b1(ok)), rms(b2(ok)), corr(a1(ok), a2(ok)), corr(b1(ok), b2(ok)));
-setup_n = setup;  setup_n.colour_norm = 'none';
+setup_n = setup;  setup_n.colour_norm = 'sum';
 [Sx_0, Sy_0] = cisg_calculate_slopes(ref, obs, setup_n);
-fprintf('   colour_norm none: rms Sx %.4f Sy %.4f; mask %.1f%%\n', rms(rg(Sx_0), 'all', 'omitnan'), ...
+fprintf('   colour_norm sum: rms Sx %.4f Sy %.4f; mask %.1f%%\n', rms(rg(Sx_0), 'all', 'omitnan'), ...
         rms(rg(Sy_0), 'all', 'omitnan'), 100*mean(isnan(rg(Sx_0)), 'all'));
 
 %% ---- figure ----
@@ -83,8 +83,8 @@ subplot(2,3,1); imagesc(dj); axis image; colorbar; title('|det J| of the referen
 hold on; rectangle('Position', [setup.roi.col_min setup.roi.row_min diff([setup.roi.col_min setup.roi.col_max]) diff([setup.roi.row_min setup.roi.row_max])] / q, 'EdgeColor', 'r');
 subplot(2,3,2); imagesc(d4(isnan(dxo))); axis image; colormap(gca, gray); title(sprintf('mask (white = NaN), frame %d, %.1f%% in ROI', frame, 100*info_o.mask_fraction));
 subplot(2,3,3); imagesc(ex); axis image; colorbar; title('synthetic: \deltax error (px)');
-subplot(2,3,4); imagesc(d4(dxo)); axis image; colorbar; title(sprintf('recovered \deltax (px), frame %d', frame));
-subplot(2,3,5); imagesc(d4(dyo)); axis image; colorbar; title(sprintf('recovered \deltay (px), frame %d', frame));
+subplot(2,3,4); imagesc(d4(dxo)); axis image; colorbar; title(sprintf('recovered \\deltax (px), frame %d', frame));
+subplot(2,3,5); imagesc(d4(dyo)); axis image; colorbar; title(sprintf('recovered \\deltay (px), frame %d', frame));
 subplot(2,3,6); imagesc(ey); axis image; colorbar; title('synthetic: \deltay error (px)');
 exportgraphics(fig, fullfile(here, 'cisg_colour_map_check.png'), 'Resolution', 100);
 close(fig);

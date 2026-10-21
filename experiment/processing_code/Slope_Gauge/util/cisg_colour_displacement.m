@@ -21,14 +21,15 @@ function [dx, dy, info] = cisg_colour_displacement(ref_image, obs_image, setup)
 % final colour residual.
 %
 % setup fields (defaults):
-%   colour_norm      'sum'   'none' | 'sum' (R/(R+G+B), G/(R+G+B): cancels brightness changes)
-%   colour_sigma     6       Gaussian smoothing of both images (px)
-%   max_disp_px      200     clamp on |delta|
-%   colour_n_iter    5
+%   colour_norm      'none'  'none' | 'sum' (R/(R+G+B), G/(R+G+B): cancels brightness changes)
+%   colour_sigma     12      Gaussian smoothing of both images (px)
+%   max_disp_px      600     clamp on |delta|
+%   colour_n_iter    15
 %   det_min_frac     0.1     mask |det J| < frac * median |det J| of the reference
 %   cond_max         10      mask cond(J) above this
-%   res_max          0.03    mask final colour residual (|C_obs - C_ref|, 0..1 units)
-%   conv_px          0.5     mask last Newton step above this (px)
+%   res_max          0.05    mask final colour residual (|C_obs - C_ref|, 0..1 units)
+%   conv_px          2        mask last Newton step above this (px)
+%   drift_corr       'none'  'gain': per-channel robust fit obs = a ref + b over the ROI, obs <- (obs - b)/a (lighting drift)
 %   roi              []      struct row_min/row_max/col_min/col_max: only these pixels
 %                            are solved (output is still full size, NaN elsewhere)
 %   target_cols      []      [left right] columns of the target (median |det J| uses them)
@@ -65,6 +66,26 @@ function [dx, dy, info] = cisg_colour_displacement(ref_image, obs_image, setup)
     pr = max(1, r1 - pad):min(H, r2 + pad);  pc = max(1, c1 - pad):min(W, c2 + pad);
     Co = prep(obs_image(pr, pc, :), o);
     Co = Co(r1 - pr(1) + 1 : r2 - pr(1) + 1, c1 - pc(1) + 1 : c2 - pc(1) + 1, :);
+
+    %% Lighting-drift correction: obs ~ a * ref + b per channel (trimmed fit, waves do not bias it)
+    drift_ab = [1 0; 1 0];
+    if strcmp(o.drift, 'gain')
+        for k = 1:2
+            Rk = cache.(sprintf('C%d', k))(r1:r2, c1:c2);
+            rcs = true(1, c2 - c1 + 1);
+            if ~isempty(o.target_cols), rcs = (c1:c2) >= o.target_cols(1) + 100 & (c1:c2) <= o.target_cols(2) - 100; end
+            xv = Rk(1:6:end, rcs(1:1:end)); xv = xv(:, 1:6:end); yv = Co(1:6:end, :, k); yv = yv(:, rcs); yv = yv(:, 1:6:end);
+            xv = double(xv(:)); yv = double(yv(:));
+            keep = true(size(xv));
+            for it = 1:6
+                p = polyfit(xv(keep), yv(keep), 1);
+                res = abs(yv - polyval(p, xv));
+                keep = res <= quantile(res, 0.7);
+            end
+            drift_ab(k, :) = p;                                % [a b]
+            Co(:, :, k) = (Co(:, :, k) - p(2)) / p(1);
+        end
+    end
 
     %% Newton iterations (row chunks)
     dx = nan(H, W, 'single');  dy = nan(H, W, 'single');
@@ -103,7 +124,7 @@ function [dx, dy, info] = cisg_colour_displacement(ref_image, obs_image, setup)
         n_tot = n_tot + numel(good);  n_bad = n_bad + nnz(~good);
     end
 
-    info = struct('mask_fraction', n_bad / n_tot, 'det_min', det_min, 'opts', o, 'seconds', toc(t0));
+    info = struct('mask_fraction', n_bad / n_tot, 'det_min', det_min, 'opts', o, 'drift_ab', drift_ab, 'seconds', toc(t0));
 end
 
 function [ok, dtm] = conditioning(a, b, c, d, det_min, cond_max)
@@ -128,13 +149,13 @@ function C = prep(img, o)
 end
 
 function o = getopts(s)
-    d = struct('colour_norm', 'sum', 'colour_sigma', 6, 'max_disp_px', 200, 'colour_n_iter', 5, ...
-               'det_min_frac', 0.1, 'cond_max', 10, 'res_max', 0.03, 'conv_px', 0.5, ...
-               'roi', [], 'target_cols', []);
+    d = struct('colour_norm', 'none', 'colour_sigma', 12, 'max_disp_px', 600, 'colour_n_iter', 15, ...
+               'det_min_frac', 0.1, 'cond_max', 10, 'res_max', 0.05, 'conv_px', 2, ...
+               'roi', [], 'target_cols', [], 'drift_corr', 'none');
     for f = fieldnames(d).'
         if isfield(s, f{1}), d.(f{1}) = s.(f{1}); end
     end
     o = struct('norm', d.colour_norm, 'sigma', d.colour_sigma, 'max_disp_px', d.max_disp_px, ...
                'n_iter', d.colour_n_iter, 'det_min_frac', d.det_min_frac, 'cond_max', d.cond_max, ...
-               'res_max', d.res_max, 'conv_px', d.conv_px, 'roi', d.roi, 'target_cols', d.target_cols);
+               'res_max', d.res_max, 'conv_px', d.conv_px, 'roi', d.roi, 'target_cols', d.target_cols, 'drift', d.drift_corr);
 end

@@ -25,9 +25,10 @@ setup.water_depth = 48;              % cm from water surface to pattern (MEASURE
 % setup.pattern_height_cm = 20*2.54;   % 50.8 cm
 setup.use_apparent_depth = true;     % slopes from L_eff and pattern-plane scale (false = legacy water_depth formula)
 setup.colour_map = 'local';          % 'local' (Jacobian inversion, util/cisg_colour_displacement.m) or 'linear' (global gradient fit)
-setup.colour_norm = 'sum';           % 'sum' = R/(R+G+B), G/(R+G+B); 'none'
-setup.colour_sigma = 6;              % px
-setup.max_disp_px = 200;
+setup.colour_norm = 'none';          % 'none' | 'sum' (R/(R+G+B), G/(R+G+B); masked ~50-85% on core 95 frame 1101, so not the default)
+setup.colour_sigma = 12;             % px
+setup.max_disp_px = 600;            % waves displace the pattern by up to ~500 px (frame 3000)
+setup.drift_corr = 'none';           % 'gain' (per-channel obs = a ref + b) did not help on frame 3000
 setup.n_water = 1.333;
 setup.n_air = 1.000;
 setup.frame_rate = fs;
