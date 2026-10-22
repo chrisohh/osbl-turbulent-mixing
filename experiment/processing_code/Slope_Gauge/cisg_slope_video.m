@@ -16,15 +16,15 @@ if ~startsWith(w_, here), error('cisg_slope_video:path', 'cisg_load_coreview res
 
 %% ---------------- User settings ----------------
 cfg.coreview_num = 95;
-cfg.frames       = 1:1:3248;    % start:stride:end
-cfg.roi_mode     = 'pick';         % 'pick' (first time; then the saved pick is reused), 'default' (central 60%), 'auto' (ROI from the reference: avoids wall shadow / flat colour map) or a roi struct
+cfg.frames       = 1001:2:3248;    % start:stride:end
+cfg.roi_mode     = 'auto';         % 'pick' (first time; then the saved pick is reused), 'default' (central 60%), 'auto' (ROI from the reference: avoids wall shadow / flat colour map) or a roi struct
 cfg.auto_margin  = 0;              % 'auto': extra inset (px) so shifted pixels still land on usable colours (100 is safe)
 cfg.dye_mask     = false;          % mask cross-stream R6G dye stripes (row-wise blue/brightness test); changes the slopes, so it gets its own cache folder
 cfg.dye_model    = '';             % '' = by run (cisg_run_defaults: 'joint' for the R6G runs 95, 96, else 'none'), or 'none' | 'joint'; joint also saves the dye map c4 in the cache
 cfg.roi_repick   = false;          % true = pick the ROI again
 cfg.out_root     = 'D:\HLAB_2026\SlopeGauge';
 cfg.out_path     = '';             % '' = <out_root>/CISG_slopes_CoreView_<N>_frames_<a>-<b>.mp4
-cfg.out_fps      = 10;
+cfg.out_fps      = 25;
 cfg.quality      = 90;
 cfg.cache_slopes = true;           % save / reuse per-frame slopes
 cfg.lim_s        = [];             % slope colour limit (+-); [] = 3 * rms of the first frame, then held
@@ -48,7 +48,7 @@ cache_dir = '';
 if cfg.cache_slopes
     sub = sprintf('CISG_slopes_CoreView_%d', cfg.coreview_num);
     if cfg.bin > 1, sub = sprintf('%s_bin%d', sub, cfg.bin); end
-    if strcmp(R.setup.dye_model, 'joint'), sub = [sub '_joint']; end       % 2-channel and joint slopes never share a cache
+    if strcmp(R.setup.dye_model, 'joint'), sub = [sub '_joint2']; end       % 2-channel and joint slopes never share a cache
     if cfg.dye_mask, sub = [sub '_dye']; end
     % Cached slopes are ROI-cropped, so a non-default ROI gets its own folder
     % (the default central-60% cache keeps its old name)

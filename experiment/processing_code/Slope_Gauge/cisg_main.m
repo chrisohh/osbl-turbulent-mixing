@@ -8,11 +8,13 @@ addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'IR Camera', 'calibrati
 coreview_num = 95;
 coreview_ref_num = coreview_num;   % still-water reference = frame 1 of the run being processed
 ref_frame    = 1;
-roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%) or a roi struct
+roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%), 'auto' (from the reference, see cisg_auto_roi) or a roi struct
+auto_margin  = 0;                  % 'auto': extra inset in px (100 keeps shifted pixels on usable colours)
+dye_model    = '';                 % '' = by run (cisg_run_defaults), or 'none' / 'joint'
 start_frame  = 1000;               % cache build: first and last frame (every 10th)
-end_frame    = 3000;%totalFrames
-preview_only  = false;              % true: slope plot of preview_frame only, nothing written to disk
-preview_frame = start_frame;       % frame shown in preview mode
+end_frame    = 1000;%totalFrames
+preview_only  =true;              % true: slope plot of preview_frame only, nothing written to disk
+preview_frame = 1510;       % frame shown in preview mode
 show_ref_channels = false;         % true: also show the reference RGB + R/G/B channel figure
 cache_root   = 'D:\HLAB_2026\SlopeGauge';
 raw_root = 'D:\HLAB_2026\Core';
@@ -50,7 +52,8 @@ fprintf('Water depth: %.1f cm\n', setup.water_depth);
 % mat produced from calibration/cisg_plate_calibrate.m (plate at the surface, IR tank frame)
 rd = cisg_run_defaults(coreview_num);                 % per-run plate frame and dye model (shared with cisg_setup_run)
 cisg_cal_path = fullfile(fileparts(mfilename('fullpath')), 'calibration', sprintf('cisg_cal_CoreView_%d.mat', rd.plate));
-setup.dye_model = rd.dye_model;  fprintf('dye_model = %s\n', rd.dye_model);
+setup.dye_model = rd.dye_model;  if ~isempty(dye_model), setup.dye_model = dye_model; end
+fprintf('dye_model = %s\n', setup.dye_model);
 cal = load(cisg_cal_path);
 cal = cal.cal;
 % local scale at the image centre for now (ROI picker); reset at the ROI centre below
@@ -105,6 +108,9 @@ fprintf('H = %.1f cm, r = %.3f, L_eff = %.1f cm (slopes); h_est = %.1f cm vs typ
 %% Pick outer ROI (will be baked into the cache — pick generously)
 if isstruct(roi_mode)
     setup.roi = roi_mode;
+elseif strcmp(roi_mode, 'auto')
+    setup.roi = cisg_auto_roi(ref_image, setup, struct('margin_px', auto_margin));
+    fprintf('auto ROI: rows %d-%d, cols %d-%d\n', setup.roi.row_min, setup.roi.row_max, setup.roi.col_min, setup.roi.col_max);
 elseif strcmp(roi_mode, 'default')
     setup.roi = struct('row_min', round(0.2*img_height), 'row_max', round(0.8*img_height), ...
                        'col_min', round(0.2*img_width),  'col_max', round(0.8*img_width));
@@ -148,7 +154,7 @@ time = (1:totalFrames - 1) * dt;
 
 out_root = cache_root;
 out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
-if strcmp(setup.dye_model, 'joint'), out_dir = [out_dir '_joint']; end    % 2-channel and joint slopes never share a cache
+if strcmp(setup.dye_model, 'joint'), out_dir = [out_dir '_joint2']; end    % 2-channel and joint slopes never share a cache
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
@@ -189,7 +195,8 @@ for count = 1:nFrames
     t  = time(count);                                               %#ok<NASGU>
     if ~isempty(sinfo) && ~isempty(sinfo.dye_c)                       % joint model: dye amount, every 4th px
         c4 = single(sinfo.dye_c(r.row_min:4:r.row_max, r.col_min:4:r.col_max)); %#ok<NASGU>
-        save(frame_path, 'Sx', 'Sy', 'c4', 'n', 't', '-v7');
+        a4 = uint8(sinfo.dye_applied(r.row_min:4:r.row_max, r.col_min:4:r.col_max)); %#ok<NASGU>   % where the joint correction applied
+        save(frame_path, 'Sx', 'Sy', 'c4', 'a4', 'n', 't', '-v7');
     else
         save(frame_path, 'Sx', 'Sy', 'n', 't', '-v7');
     end

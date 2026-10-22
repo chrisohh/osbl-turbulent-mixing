@@ -25,7 +25,8 @@ function [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, frame_file, cache_dir, b
         t = (n - 1) * dt;
         if ~isempty(info) && isfield(info, 'dye_c') && ~isempty(info.dye_c)      % dye amount (joint model), every 4th px
             c4 = single(info.dye_c(r.row_min:4:r.row_max, r.col_min:4:r.col_max));
-            save(f, 'Sx', 'Sy', 'c4', 'n', 't', '-v7');
+            a4 = uint8(info.dye_applied(r.row_min:4:r.row_max, r.col_min:4:r.col_max));   % where the joint correction was applied
+            save(f, 'Sx', 'Sy', 'c4', 'a4', 'n', 't', '-v7');
         else
             save(f, 'Sx', 'Sy', 'n', 't', '-v7');
         end

@@ -174,15 +174,16 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
         n_bad = n_bad + nnz(sel);
     end
 
-    dye_c = [];
+    dye_c = [];  dye_applied = [];
     if strcmp(o.dye_model, 'joint')                          % per-pixel (shift, dye amount) solve from all 3 channels
         s_u = setup;  s_u.roi = struct('row_min', r1, 'row_max', r2, 'col_min', c1, 'col_max', c2);
-        [dx, dy, dye_c] = cisg_dye_unmix(ref_image, obs_image, s_u, dx, dy);
+        [dx, dy, dye_c, uinfo] = cisg_dye_unmix(ref_image, obs_image, s_u, dx, dy);   % hybrid: keeps the 2-channel mask
         n_bad = nnz(isnan(dx(r1:r2, c1:c2)));
+        dye_applied = uinfo.applied;
     end
 
     info = struct('mask_fraction', n_bad / n_tot, 'dye_fraction', dye_fraction, 'det_min', det_min, 'opts', o, ...
-                  'drift_ab', drift_ab, 'dye_c', dye_c, 'seconds', toc(t0));
+                  'drift_ab', drift_ab, 'dye_c', dye_c, 'dye_applied', dye_applied, 'seconds', toc(t0));
     if nargout > 3
         D = struct('bits', bits, 'dx', dxm, 'dy', dym, 'eB', eBm, 'eS', eSm);
         D.dye_rows = dye_rows;  if o.dye_mask, D.bits(dye_rows, :) = D.bits(dye_rows, :) + 32; end
