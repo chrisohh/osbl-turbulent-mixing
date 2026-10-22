@@ -123,7 +123,7 @@ roi_centre = [mean([setup.roi.col_min setup.roi.col_max]) mean([setup.roi.row_mi
 
 %% Preview: slope plot of ONE frame, nothing written to disk
 if preview_only
-    obs_image = cisg_load_coreview(fullfile(obs_folderName, sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_num, preview_frame)));
+    obs_image = cisg_load_coreview(fullfile(obs_folderName, sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_num, preview_frame)), [img_height img_width]);
     tic;  [Sx_p, Sy_p] = cisg_calculate_slopes(ref_image, obs_image, setup);  t_prev = toc;
     r = setup.roi;
     Sx_p = Sx_p(r.row_min:r.row_max, r.col_min:r.col_max);   Sy_p = Sy_p(r.row_min:r.row_max, r.col_min:r.col_max);
@@ -172,7 +172,12 @@ for count = 1:nFrames
     end
 
     obs_fileName = sprintf("CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw", coreview_num, n);
-    [obs_image, ~] = cisg_load_coreview(strcat(obs_folderName, obs_fileName));
+    try
+        [obs_image, ~] = cisg_load_coreview(strcat(obs_folderName, obs_fileName), [img_height img_width]);
+    catch ME
+        warning('cisg_main:badFrame', 'Frame %d skipped: %s', n, strtok(ME.message, newline));
+        continue;
+    end
 
     [sx_full, sy_full] = cisg_calculate_slopes(ref_image, obs_image, setup);
 

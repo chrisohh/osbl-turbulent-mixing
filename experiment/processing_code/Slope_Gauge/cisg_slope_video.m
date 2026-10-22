@@ -9,12 +9,17 @@
 clear; close all;
 worker_gb = 1.5;                    % estimated peak RAM per parallel worker at bin 2 (GB); adjust to your measurement
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, 'util'), fullfile(here, 'calibration'), fullfile(fileparts(here), 'IR Camera', 'calibration'));
+addpath(fullfile(here, 'util'));
+cisg_fix_path(here);                 % drop stale copies under .claude/worktrees, put Slope_Gauge first
+w_ = which('cisg_load_coreview');
+if ~startsWith(w_, here), error('cisg_slope_video:path', 'cisg_load_coreview resolves to %s, not the copy next to this script', w_); end
 
 %% ---------------- User settings ----------------
 cfg.coreview_num = 95;
-cfg.frames       = 3000:1:3009;    % start:stride:end
-cfg.roi_mode     = 'pick';         % 'pick' (first time; then the saved pick is reused), 'default' (central 60%) or a roi struct
+cfg.frames       = 1:1:3248;    % start:stride:end
+cfg.roi_mode     = 'pick';         % 'pick' (first time; then the saved pick is reused), 'default' (central 60%), 'auto' (ROI from the reference: avoids wall shadow / flat colour map) or a roi struct
+cfg.auto_margin  = 0;              % 'auto': extra inset (px) so shifted pixels still land on usable colours (100 is safe)
+cfg.dye_mask     = false;          % mask cross-stream R6G dye stripes (row-wise blue/brightness test); changes the slopes, so it gets its own cache folder
 cfg.roi_repick   = false;          % true = pick the ROI again
 cfg.out_root     = 'D:\HLAB_2026\SlopeGauge';
 cfg.out_path     = '';             % '' = <out_root>/CISG_slopes_CoreView_<N>_frames_<a>-<b>.mp4
@@ -28,18 +33,21 @@ cfg.fig_size     = [1280 800];     % px, fixed for the whole video
 cfg.use_parfor   = true;           % compute missing slopes in parallel (needs cfg.cache_slopes)
 cfg.n_workers    = 'auto';         % 'auto' = min(cores - 4, 0.6 * free RAM / worker_gb, 32), or a number
 cfg.show_live    = true;           % show the frame being computed / written (falls back to false without a desktop, e.g. matlab -batch)
+cfg.bad_frame    = 'blank';        % unreadable raw file: 'blank' (empty panels, title says MISSING), 'hold' (repeat the previous good frame) or 'skip' (no video frame)
 
 %% ---------------- Setup ----------------
 R = cisg_setup_run(struct('coreview_num', cfg.coreview_num, 'roi_mode', cfg.roi_mode, ...
-                          'roi_repick', cfg.roi_repick));
+                          'roi_repick', cfg.roi_repick, 'auto_margin', cfg.auto_margin, 'setup', struct('dye_mask', cfg.dye_mask)));
 [ref_b, setup_b] = cisg_bin_setup(R.ref_image, R.setup, cfg.bin);
 frames = cfg.frames;
+bad_list = [];  bad_msgs = {};                       % frames whose raw file could not be read
 live = cfg.show_live && usejava('desktop');
 if cfg.show_live && ~live, disp('No desktop: show_live switched off'); end
 cache_dir = '';
 if cfg.cache_slopes
     sub = sprintf('CISG_slopes_CoreView_%d', cfg.coreview_num);
     if cfg.bin > 1, sub = sprintf('%s_bin%d', sub, cfg.bin); end
+    if cfg.dye_mask, sub = [sub '_dye']; end
     % Cached slopes are ROI-cropped, so a non-default ROI gets its own folder
     % (the default central-60% cache keeps its old name)
     r = R.setup.roi;
@@ -74,8 +82,10 @@ if cfg.use_parfor
         if ~isempty(pool) && pool.NumWorkers ~= nw, delete(pool); pool = []; end
         t_pool = tic;
         if isempty(pool), parpool('local', nw); end
-        paths = {fullfile(here, 'util'), fullfile(here, 'calibration'), fullfile(fileparts(here), 'IR Camera', 'calibration')};
-        pctRunOnAll(sprintf('addpath(''%s'', ''%s'', ''%s'')', paths{:}));
+        % same path fix on the workers (a pool started earlier may hold old function versions or a shadowing copy)
+        pctRunOnAll(sprintf('addpath(''%s''); cisg_fix_path(''%s'');', fullfile(here, 'util'), here));
+        wf = parfevalOnAll(@() which('cisg_load_coreview'), 1);  w_all = cellstr(fetchOutputs(wf, 'UniformOutput', false));
+        if ~all(startsWith(w_all, here)), error('cisg_slope_video:path', 'A worker resolves cisg_load_coreview to %s', w_all{find(~startsWith(w_all, here), 1)}); end
         fprintf('pool ready: %.1f s\n', toc(t_pool));
         t0 = tic;
         ff = R.frame_file;  st = setup_b;  rb = ref_b;  bn = cfg.bin;  dtt = R.dt;  cd_ = cache_dir;
@@ -86,12 +96,28 @@ if cfg.use_parfor
             axes(fp);  fp.UserData = 0;                      %#ok<LAXES>  (frame counter)
             afterEach(dq, @(d) show_progress(fp, d, numel(todo), t0));
         end
+        fs_ = R.img_size;  bad_f = false(numel(todo), 1);  bad_m = cell(numel(todo), 1);  bad_id = cell(numel(todo), 1);
         parfor i = 1:numel(todo)
-            [sx, ~] = cisg_cache_frame(todo(i), rb, st, ff, cd_, bn, dtt);
-            if ~isempty(dq), send(dq, struct('n', todo(i), 'Sx', sx(1:8:end, 1:8:end))); end
+            try
+                [sx, ~] = cisg_cache_frame(todo(i), rb, st, ff, cd_, bn, dtt, fs_);
+                if ~isempty(dq), send(dq, struct('n', todo(i), 'Sx', sx(1:8:end, 1:8:end))); end
+            catch ME                                         % record the failure (identifier + message), judged below
+                bad_f(i) = true;  bad_m{i} = ME.message;  bad_id{i} = ME.identifier;
+            end
         end
         if live, close(fp); end
+        % only 'cisg:badFrame' (empty / truncated file) is skippable; anything else is a bug: fail loudly
+        other = bad_f & ~strcmp(bad_id, 'cisg:badFrame');
+        if any(other)
+            [um, iu] = unique(bad_m(other));  fo = todo(other);  io = find(other);
+            fprintf(2, '%d frame(s) failed with an unexpected error. First distinct message(s):\n', nnz(other));
+            for k = 1:min(3, numel(um)), fprintf(2, '  [%s] frame %d: %s\n', bad_id{io(iu(k))}, fo(iu(k)), um{k}); end
+            error('cisg_slope_video:workerError', 'Aborting: unexpected error in %d of %d frames (%s)', nnz(other), numel(todo), um{1});
+        end
+        bad_list = todo(bad_f);
+        bad_msgs = arrayfun(@(k) bad_reason(ff(todo(k)), bad_m{k}), find(bad_f)', 'UniformOutput', false);
         fprintf('parfor: %d frames in %.1f s (%.1f s/frame wall)\n', numel(todo), toc(t0), toc(t0) / numel(todo));
+        report_bad(bad_list, bad_msgs, cache_dir);
     elseif ~have_pct
         fprintf('Parallel Computing Toolbox not available: computing serially in the render loop\n');
     end
@@ -99,8 +125,8 @@ end
 %% ---------------- Single frame: just the figure, no video ----------------
 if isscalar(frames)
     n = frames;
-    [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt);
-    obs = cisg_load_coreview(R.frame_file(n));
+    [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size);
+    obs = cisg_load_coreview(R.frame_file(n), R.img_size);
     if cfg.bin > 1, obs = uint8(imresize(obs, 1 / cfg.bin, 'box')); end
     fig = figure('Name', sprintf('CISG CoreView %d frame %d', cfg.coreview_num, n), ...
                  'Position', [50 50 cfg.fig_size]);
@@ -118,18 +144,47 @@ vw = VideoWriter(cfg.out_path, 'MPEG-4');
 vw.FrameRate = cfg.out_fps;  vw.Quality = cfg.quality;
 open(vw);
 opts = struct('bin', cfg.bin, 'lim_s', cfg.lim_s, 'lim_eta', cfg.lim_eta);
+have_good = false;
 tic;
 for i = 1:numel(frames)
     n = frames(i);
     t1 = tic;
-    [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt);
-    obs = cisg_load_coreview(R.frame_file(n));
-    if cfg.bin > 1, obs = uint8(imresize(obs, 1 / cfg.bin, 'box')); end
-    opts.head = sprintf('CoreView %d, frame %d, t = %.2f s', cfg.coreview_num, n, (n - 1) * R.dt);
+    blank = false;  missing = '';
+    try
+        [Sx_n, Sy_n] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size);
+        obs_n = cisg_load_coreview(R.frame_file(n), R.img_size);
+        if cfg.bin > 1, obs_n = uint8(imresize(obs_n, 1 / cfg.bin, 'box')); end
+        Sx = Sx_n;  Sy = Sy_n;  obs = obs_n;  have_good = true;
+    catch ME
+        if ~strcmp(ME.identifier, 'cisg:badFrame'), rethrow(ME); end   % only a bad file is skippable
+        reason = bad_reason(R.frame_file(n), ME.message);
+        if ~ismember(n, bad_list), bad_list(end+1) = n;  bad_msgs{end+1} = reason; end %#ok<SAGROW>
+        warning('cisg_slope_video:badFrame', 'Frame %d unreadable (%s)', n, reason);
+        switch cfg.bad_frame
+            case 'skip',  continue;
+            case 'hold'
+                if ~have_good, continue; end
+                missing = ' (missing)';                      % repeat the previous good frame
+            otherwise                                        % 'blank': same layout, empty panels
+                blank = true;
+                nr = setup_b.roi.row_max - setup_b.roi.row_min + 1;  nc = setup_b.roi.col_max - setup_b.roi.col_min + 1;
+                Sx = nan(nr, nc);  Sy = Sx;  obs = uint8(128 * ones(size(ref_b)));
+        end
+    end
+    if blank
+        opts.head = sprintf('CoreView %d, frame %d (t = %.2f s) - MISSING (%s)', cfg.coreview_num, n, (n - 1) * R.dt, reason);
+    else
+        opts.head = sprintf('CoreView %d, frame %d%s, t = %.2f s', cfg.coreview_num, n, missing, (n - 1) * R.dt);
+    end
+    opts.blank = blank;
     info = cisg_plot_frame(fig, obs, double(Sx), double(Sy), setup_b, R.cal, opts);
-    if i == 1                                                % hold the colour limits from here on
-        if isempty(opts.lim_s),   opts.lim_s   = info.lim_s;   fprintf('slope colour limit +-%.3f (first frame, held)\n', opts.lim_s); end
-        if isempty(opts.lim_eta), opts.lim_eta = info.lim_eta; fprintf('eta colour limit +-%.2f mm (first frame, held)\n', opts.lim_eta); end
+    if blank                                                 % big label on the raw panel
+        ax1 = subplot(2, 2, 1);
+        text(ax1, mean(xlim(ax1)), mean(ylim(ax1)), sprintf('frame %d missing', n), 'Color', 'w', 'FontSize', 28, ...
+             'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+    else                                                     % hold the colour limits from the first good frame
+        if isempty(opts.lim_s),   opts.lim_s   = info.lim_s;   fprintf('slope colour limit +-%.3f (held)\n', opts.lim_s); end
+        if isempty(opts.lim_eta), opts.lim_eta = info.lim_eta; fprintf('eta colour limit +-%.2f mm (held)\n', opts.lim_eta); end
     end
     fig.Position(3:4) = cfg.fig_size;
     if live, drawnow; end
@@ -139,16 +194,54 @@ for i = 1:numel(frames)
             n, i, numel(frames), toc(t1), info.rms_sx, info.rms_sy, info.rms_eta, info.masked, el, el / i * (numel(frames) - i));
 end
 close(vw);  close(fig);
+report_bad(bad_list, bad_msgs, cache_dir);
 d = dir(cfg.out_path);
-fprintf('Wrote %s (%.1f MB), %.1f s total\n', cfg.out_path, d.bytes / 1e6, toc);
+if isempty(d)
+    fprintf('No video written (no frame was rendered): %s\n', cfg.out_path);
+else
+    fprintf('Wrote %s (%.1f MB), %.1f s total\n', cfg.out_path, d.bytes / 1e6, toc);
+end
 
 function show_progress(fp, d, total, t0)
     % DataQueue callback (client): thumbnail of the slopes a worker just finished
     fp.UserData = fp.UserData + 1;
     k = fp.UserData;
     ax = fp.CurrentAxes;
-    imagesc(ax, d.Sx);  axis(ax, 'image');  colormap(ax, 'parula');
+    imagesc(ax, d.Sx, 'AlphaData', ~isnan(d.Sx));  axis(ax, 'image');  colormap(ax, 'parula');
+    set(ax, 'Color', [0.8 0.8 0.8]);                             % NaN (masked) shows grey
     el = toc(t0);
     title(ax, sprintf('computing slopes: frame %d (%d/%d), ETA %.0f s', d.n, k, total, el / k * (total - k)));
     drawnow limitrate;
+end
+
+function report_bad(bad_list, bad_msgs, cache_dir)
+    % print the unreadable frames and save "frame  reason" lines to <cache_dir>/bad_frames.txt (merged with an earlier list)
+    if isempty(bad_list), return; end
+    fprintf('%d unreadable frame(s): %s\n', numel(bad_list), mat2str(sort(bad_list)));
+    if isempty(cache_dir), return; end
+    f = fullfile(cache_dir, 'bad_frames.txt');
+    lines = containers.Map('KeyType', 'double', 'ValueType', 'char');
+    if isfile(f)
+        for L = strsplit(strtrim(fileread(f)), newline)
+            k = sscanf(L{1}, '%d', 1);
+            if ~isempty(k), lines(k) = strtrim(L{1}(find(L{1} == ' ', 1):end)); end
+        end
+    end
+    for k = 1:numel(bad_list), lines(bad_list(k)) = bad_msgs{k}; end
+    fid = fopen(f, 'w');
+    for k = sort(cell2mat(keys(lines)))
+        fprintf(fid, '%d  %s\n', k, lines(k));
+    end
+    fclose(fid);
+    fprintf('saved %s\n', f);
+end
+
+function s = bad_reason(file, msg)
+    % short reason for a bad frame: 'empty file' (header only), 'truncated file (N bytes)' or the error text
+    d = dir(file);
+    if isempty(d), s = 'file not found';
+    elseif d.bytes <= 20, s = 'empty file';
+    elseif contains(msg, 'Bad CoreView frame'), s = sprintf('bad or truncated file (%d bytes)', d.bytes);
+    else, s = strtok(msg, newline);
+    end
 end

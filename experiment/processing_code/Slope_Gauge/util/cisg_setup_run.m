@@ -9,10 +9,12 @@ function R = cisg_setup_run(cfg)
 % cfg fields (defaults):
 %   coreview_num  95
 %   ref_frame     1          still-water reference = this frame of the run
-%   roi_mode      'default'  'default' (central 60%), 'pick' (interactive) or a roi struct
+%   roi_mode      'default'  'default' (central 60%), 'auto' (from the reference, see cisg_auto_roi; auto_margin px inset),
+%                            'pick' (interactive) or a roi struct
 %   roi_file      ''         'pick': where the picked ROI is saved / reused
 %                            ('' = calibration/cisg_roi_CoreView_<N>.mat)
 %   roi_repick    false      'pick': true = pick again even if roi_file exists
+%   cal_path      ''         '' = by run: 95, 96 -> calibration/cisg_cal_CoreView_97.mat, 101 -> ..._106.mat (default 97)
 %   raw_root      'D:\HLAB_2026\Core'
 %   fs            50         frame rate (Hz)
 %   setup         struct     fields overriding the defaults below (colour_map, colour_sigma, ...)
@@ -24,7 +26,7 @@ function R = cisg_setup_run(cfg)
     addpath(fullfile(sg, 'calibration'), fullfile(fileparts(sg), 'IR Camera', 'calibration'));
 
     def = struct('coreview_num', 95, 'ref_frame', 1, 'roi_mode', 'default', ...
-                 'roi_file', '', 'roi_repick', false, ...
+                 'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'cal_path', '', ...
                  'raw_root', 'D:\HLAB_2026\Core', 'fs', 50, 'setup', struct());
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
@@ -43,7 +45,13 @@ function R = cisg_setup_run(cfg)
         setup.(f{1}) = cfg.setup.(f{1});
     end
 
-    S = load(fullfile(sg, 'calibration', 'cisg_cal_CoreView_97.mat'));
+    cal_path = cfg.cal_path;
+    if isempty(cal_path)                                  % plate frame used for each run (same camera setup)
+        lut = containers.Map({95, 96, 101}, {97, 97, 106});
+        plate = 97;  if isKey(lut, cfg.coreview_num), plate = lut(cfg.coreview_num); end
+        cal_path = fullfile(sg, 'calibration', sprintf('cisg_cal_CoreView_%d.mat', plate));
+    end
+    S = load(cal_path);
     cal = S.cal;
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal);
 
@@ -59,6 +67,10 @@ function R = cisg_setup_run(cfg)
                          'col_min', round(0.2*w), 'col_max', round(0.8*w));
     if isstruct(cfg.roi_mode)
         setup.roi = cfg.roi_mode;
+    elseif strcmp(cfg.roi_mode, 'auto')
+        % ROI that avoids what is already unusable in the reference (wall shadow, flat colour map)
+        setup.roi = cisg_auto_roi(ref_image, setup, struct('margin_px', cfg.auto_margin));
+        fprintf('auto ROI: rows %d-%d, cols %d-%d\n', setup.roi.row_min, setup.roi.row_max, setup.roi.col_min, setup.roi.col_max);
     elseif strcmp(cfg.roi_mode, 'default')
         setup.roi = roi_default;
     else

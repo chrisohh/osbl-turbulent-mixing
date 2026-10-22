@@ -51,6 +51,9 @@ function cal = cisg_plate_calibrate(cfg)
 %   lens_f_mm     35        lens focal length (only normalises r)
 %   pixel_um      5.5       pixel pitch
 %   ablated_bright true     SVG-black (engraved, anodising removed) squares are bright in the CISG image
+%   use_ir        true      false = camera-only frame (new plate frames without an IR snap): tank x = image right,
+%                           y = image up, origin = plate lattice node nearest the image centre; no IR cal, no parity
+%                           or thick-axis checks (those need the IR snapshot)
 %   ablated_parity 1        parity of (m + n) of the ablated squares in the IR tank frame
 %   show          false
 %
@@ -68,7 +71,7 @@ function cal = cisg_plate_calibrate(cfg)
                  'out_path', fullfile(here, 'cisg_cal_CoreView_97.mat'), ...
                  'board', 'coarse', 'square_mm', [], 'scales', [0.5 0.25 0.125], 'sigma_px', [40 20 80], ...
                  'n_radial', 1, 'lens_f_mm', 35, 'pixel_um', 5.5, ...
-                 'ablated_bright', true, 'ablated_parity', 1, 'show', false);
+                 'ablated_bright', true, 'ablated_parity', 1, 'use_ir', true, 'frame_size', [3072 4100], 'show', false);
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
         if ~isfield(cfg, f{1}), cfg.(f{1}) = def.(f{1}); end
@@ -78,9 +81,11 @@ function cal = cisg_plate_calibrate(cfg)
     sq = cfg.square_mm;
 
     %% IR cal: board -> tank axes
-    if ~isfile(cfg.ir_cal_path)
+    if cfg.use_ir && ~isfile(cfg.ir_cal_path)
         error('cisg_plate_calibrate:ir_cal', 'IR calibration not found: %s', cfg.ir_cal_path);
     end
+    cal_ir = [];  S_ir = [];  off_ir = [0 0];
+    if cfg.use_ir
     S = load(cfg.ir_cal_path, 'cal');
     cal_ir = S.cal;
     S_ir = cal_ir.board_to_tank;                       % tank = S_ir * board (+ offsets)
@@ -90,9 +95,10 @@ function cal = cisg_plate_calibrate(cfg)
             'IR cal uses offsets / along_sign (%s, %d); the parity rule below was measured for 0 / +1.', ...
             mat2str(off_ir), cal_ir.opts.along_sign);
     end
+    end
 
     %% Detect the corner block in the CISG frame
-    I = double(rgb2gray(cisg_load_coreview(cfg.frame_path)));
+    I = double(rgb2gray(cisg_load_coreview(cfg.frame_path, cfg.frame_size)));   % frame_size: headerless files
     sz = size(I);
     [pts, bs] = detect_block(I, cfg);
     nr = bs(1) - 1;  nc = bs(2) - 1;                   % inner corners, y fastest (detector order)
@@ -125,6 +131,7 @@ function cal = cisg_plate_calibrate(cfg)
                 opt(end).sh = sh;
                 opt(end).wp = sq * (q + sh);
                 opt(end).centre_mm = sq * (cq + sh);   % image centre in tank mm
+                opt(end).jxx = Jt(1,1);                % > 0: tank x points image right
             end
         end
     end
@@ -153,6 +160,7 @@ function cal = cisg_plate_calibrate(cfg)
         opt(i).contrast = mean(bright(ab), 'omitnan') - mean(bright(~ab), 'omitnan');
     end
     [~, ibest] = max(([opt.contrast]) * (2 * cfg.ablated_bright - 1));
+    if ~cfg.use_ir, ibest = find([opt.jxx] > 0, 1); end   % camera frame: x = image right, no parity needed
     wp = opt(ibest).wp;
     fprintf('  axis options (contrast ablated - other, counts): %+.1f | %+.1f -> option %d\n', ...
             opt(1).contrast, opt(2).contrast, ibest);
@@ -185,7 +193,7 @@ function cal = cisg_plate_calibrate(cfg)
     cal.plate_centre_offset_px = cal.plate_centre_px - c0;
     cal.mm_per_px_center       = mm_per_px(cal, cal.plate_centre_px);
     cal.frame_path  = cfg.frame_path;
-    cal.ir_cal_path = cfg.ir_cal_path;
+    cal.ir_cal_path = iff_(cfg.use_ir, cfg.ir_cal_path, '');
     cal.cfg = cfg;
 
     %% Plate frame -> camera-aligned tank frame
@@ -215,9 +223,12 @@ function cal = cisg_plate_calibrate(cfg)
     chk.unmirrored   = det(Jc) < 0;                            % same handedness as IR
     % (b) tank x is the thick-border board axis (IR cal board axes)
     thick_n = board.n_rows; if board.board_x0_mm > board.board_y0_mm, thick_n = board.n_cols; end
-    jx = find(S_ir(1,:) ~= 0, 1);                              % board column that is tank x
-    nsq_x = cal_ir.board_size(3 - jx);                         % squares spanned by it (col1 <-> bs(2))
-    chk.x_is_thick_axis = (nsq_x == thick_n);
+    nsq_x = thick_n;  chk.x_is_thick_axis = true;              % (no IR cal: not checked)
+    if cfg.use_ir
+        jx = find(S_ir(1,:) ~= 0, 1);                          % board column that is tank x
+        nsq_x = cal_ir.board_size(3 - jx);                     % squares spanned by it (col1 <-> bs(2))
+        chk.x_is_thick_axis = (nsq_x == thick_n);
+    end
     chk.centre_misfit_mm = [misfit_A misfit_B];                % x-corner-line hypothesis vs transposed
     chk.centre_hypothesis_ok = misfit_A < misfit_B;
     cal.checks = chk;
@@ -298,4 +309,8 @@ end
 function s = mm_per_px(cal, uv)
     xy = surf_px2world(cal, [uv; uv + [1 0]; uv + [0 1]]);
     s = sqrt(abs(det([xy(2,:) - xy(1,:); xy(3,:) - xy(1,:)])));   % sqrt of px area
+end
+
+function v = iff_(c, a, b)
+    if c, v = a; else, v = b; end
 end

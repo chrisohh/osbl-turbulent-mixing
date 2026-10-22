@@ -12,6 +12,7 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
 %   lim_s     []     symmetric slope colour limit; [] = 3 * max(rms Sx, rms Sy) of this frame
 %   lim_eta   []     symmetric eta limit (mm);      [] = 3 * rms eta of this frame
 %   q         16     display / integration block in full-resolution px
+%   blank     false  missing frame: all-NaN data, title is opts.head only
 %
 % Maps are in tank cm (x right, y up), eta (mm, relative) is integrated by
 % cisg_slope_to_eta.m.  info: rms_sx, rms_sy, rms_eta, masked, lim_s, lim_eta, nan_fraction.
@@ -32,7 +33,9 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
     Xq = reshape(xy(:,1), size(Cq));  Yq = reshape(xy(:,2), size(Cq));
     rsx = rms(Sx, 'all', 'omitnan');  rsy = rms(Sy, 'all', 'omitnan');  re = rms(eta(:));
     lim_s = opts.lim_s;    if isempty(lim_s),   lim_s = 3 * max(rsx, rsy); end
+    if ~isfinite(lim_s) || lim_s <= 0, lim_s = 0.3; end              % blank (all-NaN) frame before limits are known
     lim_e = opts.lim_eta;  if isempty(lim_e),   lim_e = 3 * re; end
+    if ~isfinite(lim_e) || lim_e <= 0, lim_e = 5; end
 
     figure(fig);  clf(fig);
     ds = max(1, round(4 / b));                                % raw display stride
@@ -51,8 +54,12 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
         set(gca, 'Color', [0.8 0.8 0.8]);  xlabel('x (cm)');  ylabel('y (cm)');  title(ttl{k});
     end
     masked = 100 * mean(isnan(Sx), 'all');
+    if isfield(opts, 'blank') && opts.blank
+        sgtitle(opts.head);                                        % missing frame: title only
+    else
     sgtitle(sprintf('%s | rms S_x %.4f, S_y %.4f | masked %.1f%% | rms \\eta %.2f mm | %s map, L_{eff} %.1f cm', ...
         opts.head, rsx, rsy, masked, re, setup.colour_map, setup.L_eff_cm));
+    end
     info = struct('rms_sx', rsx, 'rms_sy', rsy, 'rms_eta', re, 'masked', masked, ...
                   'lim_s', lim_s, 'lim_eta', lim_e, 'nan_fraction', ei.nan_fraction);
 end
