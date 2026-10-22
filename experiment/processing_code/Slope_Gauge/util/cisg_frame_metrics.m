@@ -31,7 +31,7 @@ function m = cisg_frame_metrics(n, ref_b, st, frame_file, bin, full_size, ycm_ro
         m.c_mean = mean(c(:), 'omitnan');  m.c_p99 = prctile(c(isfinite(c)), 99);
         m.c_row = interp1(ycm_rows, rc, yq, 'linear', NaN);
         ok = isfinite(rc) & isfinite(mean(rg(dx) * px2Sx, 2, 'omitnan')) & isfinite(mean(rg(dy) * px2Sy, 2, 'omitnan'));
-        m.corr_c_Sx = corr(rc(ok), mean(rg(dx) * px2Sx, 2, 'omitnan') * 0 + mean(rg(dx(ok, :)) * 0, 2) + mean(rg(dx) * px2Sx, 2, 'omitnan') .* 0 + rowmean_ok(rg(dx) * px2Sx, ok));
+        m.corr_c_Sx = corr(rc(ok), rowmean_ok(rg(dx) * px2Sx, ok));
         m.corr_c_Sy = corr(rc(ok), rowmean_ok(rg(dy) * px2Sy, ok));
         m.corr_c_Sxj = corr(rc(ok), rowmean_ok(rg(dxj) * px2Sx, ok));
         m.corr_c_Syj = corr(rc(ok), rowmean_ok(rg(dyj) * px2Sy, ok));

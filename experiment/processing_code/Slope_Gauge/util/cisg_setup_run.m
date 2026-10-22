@@ -55,7 +55,7 @@ function R = cisg_setup_run(cfg)
     cal = S.cal;
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal);
 
-    ref_image = cisg_load_coreview(R.frame_file(cfg.ref_frame));
+    ref_image = cisg_load_coreview(R.frame_file(cfg.ref_frame), [3072 4100]);   % some runs (101) are all headerless
     [h, w, ~] = size(ref_image);
 
     depth = cisg_apparent_depth(ref_image, cal, struct('n_w', setup.n_water));
