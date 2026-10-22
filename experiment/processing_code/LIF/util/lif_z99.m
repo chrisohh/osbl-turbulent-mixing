@@ -80,8 +80,8 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
 %               exp(-theta_img) when there is no bg
 
     def = struct('frac', 0.99, 'smooth_mm', 1.5, 'surf_gap_cm', 0.4, ...
-                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'step_cm', 0.25, 'dark', [], ...
-                 'bg_shift', true, 'bg_search_cm', 1, 'surf_median_cm', 0.6, ...
+                 'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'step_cm', 0.25, 'xmed', 3, 'filter', 'gauss', 'surf_method', 'edge', 'dark', [], ...
+                 'bg_shift', true, 'bg_search_cm', 1, 'bg_window_cm', [-1 1], 'bg_taper_cm', 2, 'surf_median_cm', 0.6, ...
                  'snr_min', 4, 'tail_cm', 1, 'tail_snr', 2, 'tail_rel', 0.02, 'z99_all', 'median', 'peak_min', 0.03, ...
                  'lit_frac', 0.5, 'trough_cm', 20, 'band_max_cm', 3, 'drift_ref', 'auto', 'clear_min_cm', 6, 'air_delta', 0, 'delta_tol', 0.01, ...
                  'air_window_cm', [2 6], 'air_above_cm', 1, 'bottom_cm', 2);
@@ -95,30 +95,38 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
         if ~isempty(opts.bg), opts.bg = opts.bg - opts.dark; end
     end
     nx  = size(I, 2);
-    sig = opts.smooth_mm / dx_mm;
-    lnI = log(max(imgaussfilt(I, sig), 1));
+    % Image noise filter (lif_img_filter), the same on frame and background
+    sm  = @(A) lif_img_filter(A, opts.filter, opts.smooth_mm / dx_mm);
+    Is  = sm(I);
+    lnI = log(max(Is, 1));
     if ~isempty(opts.bg)
-        lnB = log(max(imgaussfilt(opts.bg, sig), 1));
+        Bs  = sm(opts.bg);
+        lnB = log(max(Bs, 1));
     end
 
     % Background surface alignment.  The bg frame's surface is flat; where
     % this frame's surface is higher (crests), the bg pixels just under it
     % are air / the dark surface line, I > I_bg and theta goes negative
     % ("undyed" white band at the top).  Find the bg surface per column the
-    % same way as lif_dye_front (darkest smoothed row, here within
-    % bg_search_cm of this frame's surface), and shift each bg column so
-    % its surface sits on this frame's.  The shift is a few mm, so the
+    % same way as lif_dye_front (lif_surface_edge, opts.surf_method, here
+    % within bg_search_cm of this frame's surface), and shift each bg column
+    % so its surface sits on this frame's.  The shift is a few mm, so the
     % lighting gradient it also moves is negligible (and normalised below).
     z = z_cm(:);
     bg_shift = zeros(1, nx);
     if ~isempty(opts.bg) && opts.bg_shift
-        zb = nan(1, nx);
-        for j = 1:nx
-            r = find(abs(z - z_surf(j)) <= opts.bg_search_cm);
-            if isempty(r), continue; end
-            [~, k] = min(lnB(r, j));
-            zb(j) = z(r(k));
+        % The bg surface is static (frame 1, flat, z ~ 0 in the frame-1
+        % datum), so it is searched in a FIXED window, not around this
+        % frame's surface: over a crest (+1.6 cm at 70 s) a window following
+        % the crest missed the bg surface, latched onto something else and
+        % mis-shifted the whole bg column -> a full-height vertical strip
+        % in theta.
+        if isempty(opts.bg_window_cm)
+            bw = median(z_surf, 'omitnan') + opts.bg_search_cm * [-1 1];
+        else
+            bw = opts.bg_window_cm;
         end
+        zb = lif_surface_edge(Bs, z_cm, bw(1), bw(2), dx_mm, struct('method', opts.surf_method));
         zb = movmedian(zb, max(1, round(10*opts.surf_median_cm / dx_mm)), 'omitnan');
         bg_shift = z_surf - zb;
         bg_shift(isnan(bg_shift)) = 0;
@@ -171,14 +179,22 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
             lnC = polyval(p, z, [], mu);
         else
             lnC = lnB(:, j);
-            Bj  = opts.bg(:, j);
+            Bj  = Bs(:, j);                            % filtered, as the theta panel
             if bg_shift(j) ~= 0                        % bg surface onto this frame's
-                lnC = fillmissing(interp1(z, lnC, z - bg_shift(j), 'linear'), 'nearest');
-                Bj  = fillmissing(interp1(z, Bj,  z - bg_shift(j), 'linear'), 'nearest');
+                % Full shift at and above the surface, fading linearly to
+                % zero bg_taper_cm below it: the deep-water lighting does
+                % not move with the waves.  Shifting the whole column under a
+                % 1.2 cm crest misaligned the bg lighting over the full depth
+                % -> a full-height strip as wide as the crest (frame 3001,
+                % x = -17..-13 cm).
+                w   = min(max(1 - (z_surf(j) - z) / opts.bg_taper_cm, 0), 1);
+                zsr = z - bg_shift(j) * w;
+                lnC = fillmissing(interp1(z, lnC, zsr, 'linear'), 'nearest');
+                Bj  = fillmissing(interp1(z, Bj,  zsr, 'linear'), 'nearest');
             end
         end
         th = lnC - lnI(:, j);
-        if isempty(opts.bg), Tc = exp(-th); else, Tc = I(:, j) ./ max(Bj, 1); end
+        if isempty(opts.bg), Tc = exp(-th); else, Tc = Is(:, j) ./ max(Bj, 1); end
         theta_img(:, j) = th;  T_img(:, j) = Tc;
         if ~isempty(opts.bg) && opts.bg_normalize && nnz(clear_rows) >= 20
             off_th(j) = median(th(clear_rows));
@@ -234,7 +250,14 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
     drift_used = 'none';
     if ~isempty(opts.bg) && opts.bg_normalize
         if strcmp(ref, 'air') && nnz(~isnan(off_air_th)) >= 4*wx
-            off_th = off_air_th + d0;  off_T = off_air_T * exp(-d0);  drift_used = 'air';
+            % One offset for the whole frame: lamp / exposure drift is
+            % uniform.  Per-column air offsets picked up local changes above
+            % the water (spray / droplets on the wall late in the run) and
+            % printed them as a ~4 cm wide full-height strip in theta
+            % (CoreView 95 frame 3001, x = -17..-13 cm).
+            off_th = repmat(median(off_air_th, 'omitnan') + d0, 1, nx);
+            off_T  = repmat(median(off_air_T,  'omitnan') * exp(-d0), 1, nx);
+            drift_used = 'air';
         elseif any(~isnan(off_th))
             drift_used = 'clear';
         end
@@ -300,10 +323,10 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
                         median(depth_front(cols), 'omitnan'), opts);
         z99_x(b) = s.z99;  z90_x(b) = s.z90;  zrms_x(b) = s.zrms;  deep_x(b) = s.deep;
     end
-    if nbin >= 3
-        z99_x  = movmedian(z99_x,  3, 'omitnan', 'Endpoints', 'shrink');
-        z90_x  = movmedian(z90_x,  3, 'omitnan', 'Endpoints', 'shrink');
-        zrms_x = movmedian(zrms_x, 3, 'omitnan', 'Endpoints', 'shrink');
+    if opts.xmed > 1 && nbin >= opts.xmed               % xmed = 1: no median
+        z99_x  = movmedian(z99_x,  opts.xmed, 'omitnan', 'Endpoints', 'shrink');
+        z90_x  = movmedian(z90_x,  opts.xmed, 'omitnan', 'Endpoints', 'shrink');
+        zrms_x = movmedian(zrms_x, opts.xmed, 'omitnan', 'Endpoints', 'shrink');
     end
     z99_x(~lit(jc)) = NaN;  z90_x(~lit(jc)) = NaN;  zrms_x(~lit(jc)) = NaN;
 
@@ -339,7 +362,7 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
     stats = struct('z90', z90, 'zrms', zrms, 'z90_x', z90_x, 'zrms_x', zrms_x, 'peak', peak, ...
                    'deep_x', deep_x, 'deep_frac', mean(deep_x), 'drift_ref', drift_used, ...
                    'lit_frac', mean(lit), 'drift_delta', delta, ...
-                   'lit', lit, 'band_cm', band_cm);
+                   'lit', lit, 'band_cm', band_cm, 'bg_shift', bg_shift);
     zeta = zeta(ok);  theta_bar = theta_bar(ok);
 end
 function s = depth_stats(zeta, th, z_front, opts)
@@ -391,6 +414,11 @@ function s = depth_stats(zeta, th, z_front, opts)
     % noise is tiny, and small SYSTEMATIC residuals (bg mismatch, lighting)
     % then pass as dye and drag the all-x z99 deep while the layer is thin
     % (frame 321: all-x -3.9 cm vs local median -0.9 cm).
+    % tail_rel 0.02.  Tried 0.05 to ignore faint leftover dye from earlier
+    % runs: it cut off this run's own tail -- z99 0.1-5.9 cm shallower
+    % (median 0.9) over 38-74 s and frame-to-frame jumps up to 5.9 cm vs
+    % 1.6 cm, since the cut then sits on the steep part of the profile.
+    % Leftover-dye jumps are handled in time instead (plot_depth_timeseries).
     quiet = ths < max(opts.tail_snr * sigm, opts.tail_rel * thp);
     quiet(1:kp) = false;
     k_end = find(quiet, 1, 'first');

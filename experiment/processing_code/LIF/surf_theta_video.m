@@ -8,26 +8,27 @@
 % Title: time since wind start, t = camDelay + (n-1)/fs, from the hot-wire
 % file.  The z99 / dye-front time series is saved next to the video
 % (<out_file>_z99.mat) for the z99(t) plot.
-clear; close all;
+clearvars -except run_num; close all;   % set run_num before calling to pick the run
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
 raw_root  = 'D:\HLAB_2026\Core';
-cam       = 'Water_Surf';
-run_num   = 95;
+if ~exist('run_num', 'var'), run_num = 95; end   % run settings: util/lif_run_config.m
+R = lif_run_config(run_num);
+cam = R.cam;
 
 frame_start = 1;
 frame_step  = 10;           % every Nth acquired frame
 frame_end   = [];          % [] = last available
 
-plate_num = 94;  plate_frm = 1;
+plate_num = R.plate_num;
 sc.plate_scale = 1.0;
-sc.square_mm   = 11;       % small plate: coarse 11x10 layout with 11 mm squares
-sc.offset_mm   = 25;       % plate was this far TOWARD the camera
+sc.square_mm   = R.square_mm;  % small plate: coarse 11x10 layout with 11 mm squares
+sc.offset_mm   = R.offset_mm;  % plate this far TOWARD the camera from the tank centre
 sc.n_medium    = 1.33;
-sc.lens_f_mm   = 35;       % <-- CHECK
+sc.lens_f_mm   = R.lens_f_mm;  % Nikon 60 mm
 
-hw_file = 'D:\HLAB_2026\hotwire\hotwire_20260923_113939.mat';
+hw_file = R.hw_file;
 fs      = 50;
 
 % Hot-wire panel under the images, vertical line at the frame time
@@ -40,6 +41,7 @@ downsample = 2;
 fo.cmap            = 'bone';    % see lif_surf_figure
 fo.img_xlim        = [-25 22];  % image panels, cm
 fo.img_ylim        = [-22 7];
+fo.z99_floor_cm    = -2.3;      % no z99(x) line while the frame z99 is shallower (side-view floor, dye still at the surface)
 fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
 fo.trans_clims     = [0.75 1.05];
 fo.theta_clims     = [0 0.25];
@@ -52,7 +54,10 @@ fo.visible         = 'on';
 
 dy.dye_frac       = 0.90;  % see lif_dye_front
 dy.dye_thr        = [];
-dy.smooth_mm      = 1.5;
+dy.smooth_mm      = 0;      % (only for filter 'gauss')
+dy.filter         = 'median3';  % image noise filter: 3x3 median keeps edges and amplitude (lif_img_filter)
+dy.surf_method    = 'edge';     % surface = top of the dark band, as the side view shows it
+dy.surf_median_cm = 0;      % no running median on the surface line
 dy.surf_window_cm = [4 10];
 dy.surf_gap_cm    = 0.4;
 
@@ -62,12 +67,15 @@ zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg
                            % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
-zo.bin_cm        = 1;      % sliding window along x for z99(x) (step zo.step_cm)
-zo.step_cm       = 0.25;
+zo.bin_cm        = 0;      % z99(x) per pixel column: no window
+zo.step_cm       = 0;
+zo.xmed          = 11;     % median along x over ~2.5 mm: removes z99(x) spikes
+zo.filter        = dy.filter;
+zo.surf_method   = dy.surf_method;
 zo.snr_min       = 4;      % no z99 unless theta clears this many sigma of the noise
 zo.tail_cm       = 1;      % integral stops after this much quiet water (see lif_z99)
-bg_frames        = 1:10:100;   % dye-free frames, averaged -> theta = ln(I_bg/I).
-                           % ALL must be dye-free: check when the dye arrives.
+bg_frames        = R.bg_frames;   % dye-free frames, averaged -> theta = ln(I_bg/I).
+                           % ALL must be dye-free: check when the dye arrives (per run).
 dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtracted from I and I_bg; [] = none
 
 out_file      = fullfile(raw_root, sprintf('CoreView_%d', run_num), ...
@@ -89,8 +97,7 @@ fprintf('%s: %d complete frames (%d..%d); writing %d -> %s\n', ...
         cam, numel(avail), avail(1), avail(end), nFrames, out_file);
 
 %% ---------------- Scale, axes, background, time ----------------
-fplate = fullfile(raw_root, sprintf('CoreView_%d', plate_num), cam, ...
-                  sprintf('CoreView_%d_%s_%02d.raw', plate_num, cam, plate_frm));
+fplate = R.plate_file;
 cal_dir = fullfile(fileparts(mfilename('fullpath')), 'calibration');   % caches for the other computer
 [mmpp, c0] = lif_scale_cached(fplate, sc, fullfile(cal_dir, sprintf('scale_%s_Core%d.mat', cam, plate_num)));
 
@@ -141,6 +148,7 @@ x99_cm      = [];
 z90_all     = nan(nFrames, 1);              % 90% depth (median of bins), cm
 zrms_all    = nan(nFrames, 1);              % RMS dye depth (median of bins), cm
 peak_all    = nan(nFrames, 1);              % max of the all-x theta profile
+deep_all    = nan(nFrames, 1);              % fraction of x with dye at the frame bottom (z99 beyond view)
 
 %% ---------------- Frames ----------------
 tic;
@@ -154,7 +162,7 @@ for i = 1:nFrames
         lif_z99(I, z_cm, z_surf_all(i,:), z_front_all(i,:), mmpp*downsample, zo);
     if isempty(z99_x_all), z99_x_all = nan(nFrames, numel(jc)); x99_cm = x_cm(jc); end
     z99_x_all(i,:) = z99_x;
-    z90_all(i) = st.z90;  zrms_all(i) = st.zrms;  peak_all(i) = st.peak;
+    z90_all(i) = st.z90;  zrms_all(i) = st.zrms;  peak_all(i) = st.peak;  deep_all(i) = st.deep_frac;
 
     if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
     lif_surf_update(h, L, theta_img, x_cm, z_front_all(i,:), z_surf_all(i,:), ...
@@ -187,7 +195,7 @@ zo.bg_frames = bg_frames;  zo.dark_file = dark_file;
 [p, b] = fileparts(out_file);
 ts_file = fullfile(p, [b '_z99.mat']);
 save(ts_file, 'frames', 't_wind', 'x_cm', 'z99_all', 'z99_x_all', 'x99_cm', ...
-     'z90_all', 'zrms_all', 'peak_all', ...
+     'z90_all', 'zrms_all', 'peak_all', 'deep_all', ...
      'z_front_all', 'z_surf_all', 'depth_all', 'mmpp', 'c0', 'downsample', ...
-     'dy', 'zo', 'sc', 'hw_file');
+     'dy', 'zo', 'sc', 'hw_file', 'run_num', 'R');
 fprintf('Saved z99 time series to %s\n', ts_file);

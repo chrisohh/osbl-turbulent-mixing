@@ -25,7 +25,10 @@ function [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, dx_mm, opts)
 %   surf_window_cm [4 10], surf_gap_cm 0.4, top_band_cm 0.8, surf_median_cm 0.6,
 %   surf_above_mm 8, surf_contrast 0.15 (surface row must be this fraction
 %   darker than the air surf_above_mm above it), surf_jump_cm 0.5 (points
-%   further than this from the 2 cm running median are refilled)
+%   further than this from the 2 cm running median are refilled),
+%   filter 'gauss' (image filter, lif_img_filter: 'none' | 'median3' |
+%   'median5' | 'wiener5' | 'gauss' with smooth_mm), surf_method 'edge'
+%   (lif_surface_edge: 'edge' = top of the dark surface band | 'darkest')
 %
 % Outputs (all [1 x nx], cm / counts):
 %   z_front - front height (NaN where the column is clear under the gap)
@@ -35,35 +38,33 @@ function [z_front, z_surf, thr_col] = lif_dye_front(I, z_cm, dx_mm, opts)
     def = struct('dye_frac', 0.9, 'dye_thr', [], 'smooth_mm', 1.5, ...
                  'surf_window_cm', [4 10], 'surf_gap_cm', 0.4, ...
                  'top_band_cm', 0.8, 'surf_median_cm', 0.6, ...
-                 'surf_above_mm', 8, 'surf_contrast', 0.15, 'surf_jump_cm', 0.5);
+                 'surf_above_mm', 8, 'surf_contrast', 0.15, 'surf_jump_cm', 0.5, ...
+                 'filter', 'gauss', 'surf_method', 'edge');
     if nargin < 4, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
     end
 
     [ny, nx] = size(I);
-    Is = imgaussfilt(I, opts.smooth_mm / dx_mm);
+    Is = lif_img_filter(I, opts.filter, opts.smooth_mm / dx_mm);
 
-    rows   = find(z_cm >= opts.surf_window_cm(1) & z_cm <= opts.surf_window_cm(2));
-    [~, k] = min(Is(rows, :), [], 1);
-    r      = rows(k);
-    zs     = z_cm(r);
-    % Accept the darkest row only where the air above it is clearly
-    % brighter: the surface line under the lit background.  Where the air
-    % itself is dark (outside the lit panel, CoreView 95 x > ~22 cm) the
-    % darkest row can sit anywhere in the air.  Rejected columns, and points
-    % that jump away from their neighbours, are filled along x.
-    na   = max(1, round(opts.surf_above_mm / dx_mm));
-    ra   = max(r - na, 1);
-    Iabv = Is(sub2ind(size(Is), ra, 1:nx));
-    Ilin = Is(sub2ind(size(Is), r,  1:nx));
-    zs((Iabv - Ilin) ./ max(Iabv, 1) < opts.surf_contrast) = NaN;
+    % Surface as the side view shows it (lif_surface_edge, opts.surf_method
+    % 'edge' = top of the dark band).  Columns outside the lit panel (dark
+    % air) come back NaN; they and points that jump away from their
+    % neighbours are filled along x.
+    zs = lif_surface_edge(Is, z_cm, opts.surf_window_cm(1), opts.surf_window_cm(2), dx_mm, ...
+         struct('method', opts.surf_method, 'above_mm', opts.surf_above_mm, ...
+                'contrast', opts.surf_contrast));
     wm = max(3, round(20 / dx_mm));                    % 2 cm reference median
     zm = movmedian(zs, wm, 'omitnan');
     zs(abs(zs - zm) > opts.surf_jump_cm) = NaN;
-    if all(isnan(zs)), zs = z_cm(r); end               % nothing passed: old behaviour
+    if all(isnan(zs))                                  % nothing passed: darkest row
+        rows   = find(z_cm >= opts.surf_window_cm(1) & z_cm <= opts.surf_window_cm(2));
+        [~, k] = min(Is(rows, :), [], 1);
+        zs     = z_cm(rows(k));
+    end
     zs = fillmissing(zs, 'linear', 'EndValues', 'nearest');
-    z_surf = movmedian(zs, round(10*opts.surf_median_cm / dx_mm));
+    z_surf = movmedian(zs, max(1, round(10*opts.surf_median_cm / dx_mm)));   % surf_median_cm = 0: none
 
     below   = z_cm(:) < z_surf - opts.surf_gap_cm;   % [ny x nx]
     n_top   = max(1, round(10*opts.top_band_cm / dx_mm));   % band for I_dye

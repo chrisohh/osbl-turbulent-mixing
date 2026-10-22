@@ -40,6 +40,7 @@ downsample = 2;
 fo.cmap            = 'bone';
 fo.img_xlim        = [-25 22];  % image panels, cm
 fo.img_ylim        = [-22 7];
+fo.z99_floor_cm    = -2.3;      % no z99(x) line while the frame z99 is shallower (side-view floor, dye still at the surface)
 fo.theta_clims     = [0 0.25];
 fo.theta_log       = false;
 fo.theta_clims_log = [0.005 0.3];
@@ -55,7 +56,10 @@ fo.show_z99        = false;     % no z99 overlay or legend entry
 
 dy.dye_frac       = 0.90;  % see lif_dye_front
 dy.dye_thr        = [];
-dy.smooth_mm      = 1.5;
+dy.smooth_mm      = 0;      % (only for filter 'gauss')
+dy.filter         = 'median3';  % image noise filter: 3x3 median keeps edges and amplitude (lif_img_filter)
+dy.surf_method    = 'edge';     % surface = top of the dark band, as the side view shows it
+dy.surf_median_cm = 0;      % no running median on the surface line
 dy.surf_window_cm = [4 10];
 dy.surf_gap_cm    = 0.4;
 
@@ -67,8 +71,11 @@ zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg
                            % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
-zo.bin_cm        = 1;      % sliding window along x for z99(x) (step zo.step_cm)
-zo.step_cm       = 0.25;
+zo.bin_cm        = 0;      % z99(x) per pixel column: no window
+zo.step_cm       = 0;
+zo.xmed          = 11;     % median along x over ~2.5 mm: removes z99(x) spikes
+zo.filter        = dy.filter;
+zo.surf_method   = dy.surf_method;
 zo.snr_min       = 4;
 zo.tail_cm       = 1;
 bg_frames        = 1:10:100;   % dye-free frames, averaged -> theta = ln(I_bg/I).

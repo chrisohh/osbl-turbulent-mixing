@@ -22,6 +22,12 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
     set(h.imT, 'CData', T, 'AlphaData', ~isnan(theta_img));            % air blank
 
     z99_line = z_surf(jc) + z99_x;
+    % While the frame z99 is shallower than the side-view floor the dye is
+    % still a surface layer and z99(x) is noise: draw no line (opts
+    % z99_floor_cm; CoreView 95: -2.3 cm, resolved from t ~ 42 s)
+    fl = h.opts.z99_floor_cm;
+    unresolved = ~isempty(fl) && ~(z99 < fl);
+    if unresolved, z99_line(:) = NaN; end
     for p = {{h.sfR, h.z9R}, {h.sfT, h.z9T}}
         if ~isempty(p{1}{1}), set(p{1}{1}, 'YData', z_surf); end
         if ~isempty(p{1}{2}), set(p{1}{2}, 'XData', x_cm(jc), 'YData', z99_line); end
@@ -30,10 +36,16 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
     if ~isempty(h.prP)
         set(h.prP, 'XData', theta_bar, 'YData', zeta);
         if ~isempty(h.z9P)
-            set(h.z9P, 'YData', [z99 z99]);
-            q = prctile(z99_x, [5 95]);
-            set(h.bandP, 'YData', q([1 1 2 2]));
-            h.ttP.String = sprintf('$z_{99} = %.2f$ cm', z99);
+            if unresolved
+                set(h.z9P, 'YData', [NaN NaN]);
+                set(h.bandP, 'YData', [NaN NaN NaN NaN]);
+                h.ttP.String = sprintf('$z_{99}$ unresolved (above %.1f cm)', fl);
+            else
+                set(h.z9P, 'YData', [z99 z99]);
+                q = prctile(z99_x, [5 95]);
+                set(h.bandP, 'YData', q([1 1 2 2]));
+                h.ttP.String = sprintf('$z_{99} = %.2f$ cm', z99);
+            end
         end
     end
     h.tt.String  = ttl;
