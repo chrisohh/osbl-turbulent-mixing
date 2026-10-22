@@ -1,4 +1,4 @@
-function [Sx, Sy] = cisg_calculate_slopes(ref_image, obs_image, setup)
+function [Sx, Sy, info] = cisg_calculate_slopes(ref_image, obs_image, setup)
 % CISG_CALCULATE_SLOPES Calculate surface slopes from CISG images
 %
 % Inputs:
@@ -6,11 +6,12 @@ function [Sx, Sy] = cisg_calculate_slopes(ref_image, obs_image, setup)
 %   obs_image - observed image (wavy surface), RGB uint8 or uint16
 %   design - design parameters struct
 %
-% Outputs:
+% Outputs (info: colour-inversion info of the 'local' map, e.g. info.dye_c with setup.dye_model = 'joint'; [] otherwise):
 %   Sx - x-component of surface slope
 %   Sy - y-component of surface slope
 
 % Extract color channels and convert to double
+info = [];
 R_ref = double(ref_image(:,:,1));
 G_ref = double(ref_image(:,:,2));
 
@@ -47,7 +48,7 @@ end
 if use_new && isfield(setup, 'colour_map') && strcmp(setup.colour_map, 'local')
     % Local colour -> position inversion (Jacobian of the reference frame); NaN where untrustworthy.
     % dpx: shift along columns, dpy: along rows (same sign as the linear path), in pixels
-    [dpx, dpy] = cisg_colour_displacement(ref_image, obs_image, setup);
+    [dpx, dpy, info] = cisg_colour_displacement(ref_image, obs_image, setup);
     Sx = dpx * (setup.pattern_scale * setup.cm_per_pixel_x) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
     Sy = dpy * (setup.pattern_scale * setup.cm_per_pixel_y) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
     return;

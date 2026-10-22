@@ -17,12 +17,17 @@ function [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, frame_file, cache_dir, b
     if nargin < 8 || isempty(full_size), full_size = bin * [size(ref_b, 1) size(ref_b, 2)]; end
     obs = cisg_load_coreview(frame_file(n), full_size);          % throws 'cisg:badFrame' on a bad file
     if bin > 1, obs = uint8(imresize(obs, 1 / bin, 'box')); end
-    [sx, sy] = cisg_calculate_slopes(ref_b, obs, setup_b);
+    [sx, sy, info] = cisg_calculate_slopes(ref_b, obs, setup_b);
     r = setup_b.roi;
     Sx = single(sx(r.row_min:r.row_max, r.col_min:r.col_max));
     Sy = single(sy(r.row_min:r.row_max, r.col_min:r.col_max));
     if ~isempty(f)
         t = (n - 1) * dt;
-        save(f, 'Sx', 'Sy', 'n', 't', '-v7');
+        if ~isempty(info) && isfield(info, 'dye_c') && ~isempty(info.dye_c)      % dye amount (joint model), every 4th px
+            c4 = single(info.dye_c(r.row_min:4:r.row_max, r.col_min:4:r.col_max));
+            save(f, 'Sx', 'Sy', 'c4', 'n', 't', '-v7');
+        else
+            save(f, 'Sx', 'Sy', 'n', 't', '-v7');
+        end
     end
 end

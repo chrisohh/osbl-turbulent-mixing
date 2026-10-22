@@ -14,7 +14,8 @@ function R = cisg_setup_run(cfg)
 %   roi_file      ''         'pick': where the picked ROI is saved / reused
 %                            ('' = calibration/cisg_roi_CoreView_<N>.mat)
 %   roi_repick    false      'pick': true = pick again even if roi_file exists
-%   cal_path      ''         '' = by run: 95, 96 -> calibration/cisg_cal_CoreView_97.mat, 101 -> ..._106.mat (default 97)
+%   cal_path      ''         '' = by run (cisg_run_defaults: 95, 96 -> cisg_cal_CoreView_97.mat, 101 -> ..._106.mat)
+%   dye_model     ''         '' = by run (cisg_run_defaults: 'joint' for the R6G runs 95, 96, else 'none'); or 'none' | 'joint'
 %   raw_root      'D:\HLAB_2026\Core'
 %   fs            50         frame rate (Hz)
 %   setup         struct     fields overriding the defaults below (colour_map, colour_sigma, ...)
@@ -26,7 +27,7 @@ function R = cisg_setup_run(cfg)
     addpath(fullfile(sg, 'calibration'), fullfile(fileparts(sg), 'IR Camera', 'calibration'));
 
     def = struct('coreview_num', 95, 'ref_frame', 1, 'roi_mode', 'default', ...
-                 'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'cal_path', '', ...
+                 'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'cal_path', '', 'dye_model', '', ...
                  'raw_root', 'D:\HLAB_2026\Core', 'fs', 50, 'setup', struct());
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
@@ -46,11 +47,12 @@ function R = cisg_setup_run(cfg)
     end
 
     cal_path = cfg.cal_path;
+    rd = cisg_run_defaults(cfg.coreview_num);
     if isempty(cal_path)                                  % plate frame used for each run (same camera setup)
-        lut = containers.Map({95, 96, 101}, {97, 97, 106});
-        plate = 97;  if isKey(lut, cfg.coreview_num), plate = lut(cfg.coreview_num); end
-        cal_path = fullfile(sg, 'calibration', sprintf('cisg_cal_CoreView_%d.mat', plate));
+        cal_path = fullfile(sg, 'calibration', sprintf('cisg_cal_CoreView_%d.mat', rd.plate));
     end
+    setup.dye_model = cfg.dye_model;  if isempty(setup.dye_model), setup.dye_model = rd.dye_model; end
+    fprintf('CoreView %d: calibration %s, dye_model = %s\n', cfg.coreview_num, cal_path(find(cal_path == filesep, 1, 'last') + 1:end), setup.dye_model);
     S = load(cal_path);
     cal = S.cal;
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal);

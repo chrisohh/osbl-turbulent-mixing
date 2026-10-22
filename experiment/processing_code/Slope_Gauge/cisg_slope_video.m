@@ -20,6 +20,7 @@ cfg.frames       = 1:1:3248;    % start:stride:end
 cfg.roi_mode     = 'pick';         % 'pick' (first time; then the saved pick is reused), 'default' (central 60%), 'auto' (ROI from the reference: avoids wall shadow / flat colour map) or a roi struct
 cfg.auto_margin  = 0;              % 'auto': extra inset (px) so shifted pixels still land on usable colours (100 is safe)
 cfg.dye_mask     = false;          % mask cross-stream R6G dye stripes (row-wise blue/brightness test); changes the slopes, so it gets its own cache folder
+cfg.dye_model    = '';             % '' = by run (cisg_run_defaults: 'joint' for the R6G runs 95, 96, else 'none'), or 'none' | 'joint'; joint also saves the dye map c4 in the cache
 cfg.roi_repick   = false;          % true = pick the ROI again
 cfg.out_root     = 'D:\HLAB_2026\SlopeGauge';
 cfg.out_path     = '';             % '' = <out_root>/CISG_slopes_CoreView_<N>_frames_<a>-<b>.mp4
@@ -37,7 +38,7 @@ cfg.bad_frame    = 'blank';        % unreadable raw file: 'blank' (empty panels,
 
 %% ---------------- Setup ----------------
 R = cisg_setup_run(struct('coreview_num', cfg.coreview_num, 'roi_mode', cfg.roi_mode, ...
-                          'roi_repick', cfg.roi_repick, 'auto_margin', cfg.auto_margin, 'setup', struct('dye_mask', cfg.dye_mask)));
+                          'roi_repick', cfg.roi_repick, 'auto_margin', cfg.auto_margin, 'dye_model', cfg.dye_model, 'setup', struct('dye_mask', cfg.dye_mask)));
 [ref_b, setup_b] = cisg_bin_setup(R.ref_image, R.setup, cfg.bin);
 frames = cfg.frames;
 bad_list = [];  bad_msgs = {};                       % frames whose raw file could not be read
@@ -47,6 +48,7 @@ cache_dir = '';
 if cfg.cache_slopes
     sub = sprintf('CISG_slopes_CoreView_%d', cfg.coreview_num);
     if cfg.bin > 1, sub = sprintf('%s_bin%d', sub, cfg.bin); end
+    if strcmp(R.setup.dye_model, 'joint'), sub = [sub '_joint']; end       % 2-channel and joint slopes never share a cache
     if cfg.dye_mask, sub = [sub '_dye']; end
     % Cached slopes are ROI-cropped, so a non-default ROI gets its own folder
     % (the default central-60% cache keeps its old name)

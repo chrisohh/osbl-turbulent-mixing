@@ -48,7 +48,9 @@ fprintf('Water depth: %.1f cm\n', setup.water_depth);
 
 %% Load calibration
 % mat produced from calibration/cisg_plate_calibrate.m (plate at the surface, IR tank frame)
-cisg_cal_path = fullfile(fileparts(mfilename('fullpath')), 'calibration', 'cisg_cal_CoreView_97.mat');
+rd = cisg_run_defaults(coreview_num);                 % per-run plate frame and dye model (shared with cisg_setup_run)
+cisg_cal_path = fullfile(fileparts(mfilename('fullpath')), 'calibration', sprintf('cisg_cal_CoreView_%d.mat', rd.plate));
+setup.dye_model = rd.dye_model;  fprintf('dye_model = %s\n', rd.dye_model);
 cal = load(cisg_cal_path);
 cal = cal.cal;
 % local scale at the image centre for now (ROI picker); reset at the ROI centre below
@@ -146,6 +148,7 @@ time = (1:totalFrames - 1) * dt;
 
 out_root = cache_root;
 out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
+if strcmp(setup.dye_model, 'joint'), out_dir = [out_dir '_joint']; end    % 2-channel and joint slopes never share a cache
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
@@ -179,12 +182,17 @@ for count = 1:nFrames
         continue;
     end
 
-    [sx_full, sy_full] = cisg_calculate_slopes(ref_image, obs_image, setup);
+    [sx_full, sy_full, sinfo] = cisg_calculate_slopes(ref_image, obs_image, setup);
 
     Sx = single(sx_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
     Sy = single(sy_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
     t  = time(count);                                               %#ok<NASGU>
-    save(frame_path, 'Sx', 'Sy', 'n', 't', '-v7');
+    if ~isempty(sinfo) && ~isempty(sinfo.dye_c)                       % joint model: dye amount, every 4th px
+        c4 = single(sinfo.dye_c(r.row_min:4:r.row_max, r.col_min:4:r.col_max)); %#ok<NASGU>
+        save(frame_path, 'Sx', 'Sy', 'c4', 'n', 't', '-v7');
+    else
+        save(frame_path, 'Sx', 'Sy', 'n', 't', '-v7');
+    end
     n_done = n_done + 1;
 
     if mod(count, 25) == 0
