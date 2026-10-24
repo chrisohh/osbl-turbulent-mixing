@@ -7,11 +7,16 @@ function rd = cisg_run_defaults(coreview_num)
 %                (calibration/cisg_cal_CoreView_<plate>.mat): runs 95, 96 -> 97; 101 -> 106; others -> 97
 % rd.dye_model   'joint' for the rhodamine 6G runs (95, 96: per-pixel dye unmixing, cisg_dye_unmix.m),
 %                'none' otherwise (101 is dye-free)
+% rd.ir_snap     IR snapshot of the same plate placement: 95, 96 -> Snap-000096; 101 -> Snap-000101
+% rd.ir_cal_path IR Camera/calibration/surface_cal_Snap-<ir_snap>.mat (may not exist yet: check isfile);
+%                use with cisg_ir_to_cisg(load(rd.ir_cal_path).cal, cal_cisg, uv_ir)
 
-    plate = 97;  dye = 'none';
+    plate = 97;  dye = 'none';  snap = 96;
     switch coreview_num
-        case {95, 96},  plate = 97;  dye = 'joint';
-        case 101,       plate = 106;
+        case {95, 96},  plate = 97;  dye = 'joint';  snap = 96;
+        case 101,       plate = 106;  snap = 101;
     end
-    rd = struct('plate', plate, 'dye_model', dye);
+    pc = fileparts(fileparts(fileparts(mfilename('fullpath'))));        % processing_code
+    rd = struct('plate', plate, 'dye_model', dye, 'ir_snap', snap, ...
+                'ir_cal_path', fullfile(pc, 'IR Camera', 'calibration', sprintf('surface_cal_Snap-%06d.mat', snap)));
 end

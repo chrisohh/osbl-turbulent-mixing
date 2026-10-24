@@ -51,6 +51,15 @@ if use_new && isfield(setup, 'colour_map') && strcmp(setup.colour_map, 'local')
     [dpx, dpy, info] = cisg_colour_displacement(ref_image, obs_image, setup);
     Sx = dpx * (setup.pattern_scale * setup.cm_per_pixel_x) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
     Sy = dpy * (setup.pattern_scale * setup.cm_per_pixel_y) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
+    k_sp = 4;  if isfield(setup, 'speckle_k'), k_sp = setup.speckle_k; end        % isolated-speckle filter (0 = off)
+    info.n_speckle = 0;
+    if k_sp > 0
+        rr = [1 size(Sx, 1)];  cc = [1 size(Sx, 2)];
+        if isfield(setup, 'roi'), rr = [setup.roi.row_min setup.roi.row_max];  cc = [setup.roi.col_min setup.roi.col_max]; end
+        [a, n1] = cisg_despeckle(Sx(rr(1):rr(2), cc(1):cc(2)), k_sp);  Sx(rr(1):rr(2), cc(1):cc(2)) = a;
+        [a, n2] = cisg_despeckle(Sy(rr(1):rr(2), cc(1):cc(2)), k_sp);  Sy(rr(1):rr(2), cc(1):cc(2)) = a;
+        info.n_speckle = [n1 n2];
+    end
     return;
 end
 

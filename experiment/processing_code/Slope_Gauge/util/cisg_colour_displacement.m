@@ -72,6 +72,14 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
     cs = 1:W;  if ~isempty(o.target_cols), cs = max(1, round(o.target_cols(1))):min(W, round(o.target_cols(2))); end
     dd = abs(ga(1:16:end, cs(1:16:end)) .* gd(1:16:end, cs(1:16:end)) - gb(1:16:end, cs(1:16:end)) .* gc(1:16:end, cs(1:16:end)));
     det_min = o.det_min_frac * median(dd(:));
+    % physical precision mask: propagate the camera noise through J^-1 to the slope uncertainty (needs setup.noise,
+    % from cisg_noise_estimate, and the slope scale fields); the relative |det J| / cond tests are then only loose guards
+    use_sig = ~isempty(o.noise) && strcmp(o.norm, 'none') && all(isfield(setup, {'pattern_scale', 'cm_per_pixel_x', 'cm_per_pixel_y', 'L_eff_cm', 'n_water', 'n_air'}));
+    cond_eff = o.cond_max;
+    if use_sig
+        det_min = 0.003 * median(dd(:));  cond_eff = 100;
+        kS = [setup.pattern_scale * setup.cm_per_pixel_x, setup.pattern_scale * setup.cm_per_pixel_y] / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
+    end
 
     %% Observed: smoothed colours (ROI + margin)
     pad = ceil(4 * o.sigma);
@@ -109,6 +117,8 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
 
     %% Newton iterations (row chunks)
     dx = nan(H, W, 'single');  dy = nan(H, W, 'single');
+    sig_sx = [];  sig_sy = [];
+    if use_sig, sig_sx = nan(r2 - r1 + 1, c2 - c1 + 1, 'single');  sig_sy = sig_sx; end
     chunk = 256;
     n_tot = 0;  n_bad = 0;
     for rs = r1:chunk:r2
@@ -123,7 +133,7 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
             e2 = O2 - interp2(C2, xs, ys, 'linear');
             a = interp2(ga, xs, ys, 'linear');  b = interp2(gb, xs, ys, 'linear');
             c = interp2(gc, xs, ys, 'linear');  d = interp2(gd, xs, ys, 'linear');
-            [ok, dtm] = conditioning(a, b, c, d, det_min, o.cond_max);
+            [ok, dtm] = conditioning(a, b, c, d, det_min, cond_eff);
             sx = (d .* e1 - b .* e2) ./ dtm;
             sy = (a .* e2 - c .* e1) ./ dtm;
             sx(~ok) = 0;  sy(~ok) = 0;
@@ -135,17 +145,30 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
         xs = min(max(X + ux, 1), W);  ys = min(max(Y + uy, 1), H);
         e1 = O1 - interp2(C1, xs, ys, 'linear');
         e2 = O2 - interp2(C2, xs, ys, 'linear');
-        [ok, ~] = conditioning(interp2(ga, xs, ys, 'linear'), interp2(gb, xs, ys, 'linear'), ...
-                               interp2(gc, xs, ys, 'linear'), interp2(gd, xs, ys, 'linear'), det_min, o.cond_max);
+        ja = interp2(ga, xs, ys, 'linear');  jb = interp2(gb, xs, ys, 'linear');
+        jc = interp2(gc, xs, ys, 'linear');  jd = interp2(gd, xs, ys, 'linear');
+        [ok, ~] = conditioning(ja, jb, jc, jd, det_min, cond_eff);
         oob = ~((X + ux >= 1) & (X + ux <= W) & (Y + uy >= 1) & (Y + uy <= H));
         good = ok & hypot(e1, e2) <= o.res_max & step <= o.conv_px & isfinite(ux) & isfinite(uy) & ~oob;
+        precok = true(size(good));
+        if use_sig                                           % Cov(delta) = J^-1 diag(sigma_c^2) J^-T, sigma_c(R, G at x + delta)
+            s1 = max(o.noise.a(1) + o.noise.b(1) * interp2(C1, xs, ys, 'linear'), 1e-5);
+            s2 = max(o.noise.a(2) + o.noise.b(2) * interp2(C2, xs, ys, 'linear'), 1e-5);
+            dt2 = max(abs(ja .* jd - jb .* jc), eps('single'));
+            sSx = kS(1) * sqrt(jd.^2 .* s1.^2 + jb.^2 .* s2.^2) ./ dt2;
+            sSy = kS(2) * sqrt(jc.^2 .* s1.^2 + ja.^2 .* s2.^2) ./ dt2;
+            precok = max(sSx, sSy) <= o.max_slope_sigma;
+            good = good & precok;
+            ii = rs - r1 + 1 : re - r1 + 1;
+            sig_sx(ii, :) = single(sSx);  sig_sy(ii, :) = single(sSy);
+        end
         if need_bs
             ii = rs - r1 + 1 : re - r1 + 1;
             eBm(ii, :) = OB(ii, :) - interp2(cache.CB, xs, ys, 'linear');
             eSm(ii, :) = OS(ii, :) - interp2(cache.CS, xs, ys, 'linear');
             dxm(ii, :) = ux;  dym(ii, :) = uy;
             bits(ii, :) = uint8(oob) + 2 * uint8(abs(ux) >= o.max_disp_px | abs(uy) >= o.max_disp_px) + 4 * uint8(~ok) ...
-                          + 8 * uint8(step > o.conv_px) + 16 * uint8(hypot(e1, e2) > o.res_max);
+                          + 8 * uint8(step > o.conv_px) + 16 * uint8(hypot(e1, e2) > o.res_max) + 128 * uint8(~precok);
         end
         ux(~good) = NaN;  uy(~good) = NaN;
         dx(rs:re, c1:c2) = ux;  dy(rs:re, c1:c2) = uy;
@@ -174,6 +197,14 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
         n_bad = n_bad + nnz(sel);
     end
 
+    if ~isempty(o.dark_mask)                                 % dark / outside the target in the reference itself
+        dm = o.dark_mask(r1:r2, c1:c2);
+        dxr = dx(r1:r2, c1:c2);  dyr = dy(r1:r2, c1:c2);
+        n_bad = n_bad + nnz(dm & isfinite(dxr));
+        dxr(dm) = NaN;  dyr(dm) = NaN;
+        dx(r1:r2, c1:c2) = dxr;  dy(r1:r2, c1:c2) = dyr;
+        if need_bs, bits(dm) = bits(dm) + 64; end
+    end
     dye_c = [];  dye_applied = [];
     if strcmp(o.dye_model, 'joint')                          % per-pixel (shift, dye amount) solve from all 3 channels
         s_u = setup;  s_u.roi = struct('row_min', r1, 'row_max', r2, 'col_min', c1, 'col_max', c2);
@@ -183,7 +214,8 @@ function [dx, dy, info, D] = cisg_colour_displacement(ref_image, obs_image, setu
     end
 
     info = struct('mask_fraction', n_bad / n_tot, 'dye_fraction', dye_fraction, 'det_min', det_min, 'opts', o, ...
-                  'drift_ab', drift_ab, 'dye_c', dye_c, 'dye_applied', dye_applied, 'seconds', toc(t0));
+                  'drift_ab', drift_ab, 'dye_c', dye_c, 'dye_applied', dye_applied, 'sig_sx', sig_sx, 'sig_sy', sig_sy, ...
+                  'sigma_mask', use_sig, 'seconds', toc(t0));
     if nargout > 3
         D = struct('bits', bits, 'dx', dxm, 'dy', dym, 'eB', eBm, 'eS', eSm);
         D.dye_rows = dye_rows;  if o.dye_mask, D.bits(dye_rows, :) = D.bits(dye_rows, :) + 32; end
@@ -221,12 +253,12 @@ function o = getopts(s)
     d = struct('colour_norm', 'none', 'colour_sigma', 12, 'max_disp_px', 600, 'colour_n_iter', 15, ...
                'det_min_frac', 0.1, 'cond_max', 10, 'res_max', 0.05, 'conv_px', 2, ...
                'roi', [], 'target_cols', [], 'drift_corr', 'none', ...
-               'dye_mask', false, 'dye_thresh', [0.010 0.004], 'dye_dilate_px', 6, 'dye_win', 101, 'dye_model', 'none');
+               'dye_mask', false, 'dye_thresh', [0.010 0.004], 'dye_dilate_px', 6, 'dye_win', 101, 'dye_model', 'none', 'dark_mask', [], 'noise', [], 'max_slope_sigma', 0.02);
     for f = fieldnames(d).'
         if isfield(s, f{1}), d.(f{1}) = s.(f{1}); end
     end
     o = struct('norm', d.colour_norm, 'sigma', d.colour_sigma, 'max_disp_px', d.max_disp_px, ...
                'n_iter', d.colour_n_iter, 'det_min_frac', d.det_min_frac, 'cond_max', d.cond_max, ...
                'res_max', d.res_max, 'conv_px', d.conv_px, 'roi', d.roi, 'target_cols', d.target_cols, 'drift', d.drift_corr, ...
-               'dye_mask', d.dye_mask, 'dye_thresh', d.dye_thresh, 'dye_dilate', d.dye_dilate_px, 'dye_win', d.dye_win, 'dye_model', d.dye_model);
+               'dye_mask', d.dye_mask, 'dye_thresh', d.dye_thresh, 'dye_dilate', d.dye_dilate_px, 'dye_win', d.dye_win, 'dye_model', d.dye_model, 'dark_mask', d.dark_mask, 'noise', d.noise, 'max_slope_sigma', d.max_slope_sigma);
 end

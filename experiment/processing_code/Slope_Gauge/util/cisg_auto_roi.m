@@ -62,5 +62,5 @@ function [roi, info] = cisg_auto_roi(ref_image, setup, opts)
     [H0, W0] = deal(size(ref_image, 1), size(ref_image, 2));
     roi = struct('row_min', max(1, round((r1 - 1) * s + 1)), 'row_max', min(H0, round(r2 * s)), ...
                  'col_min', max(1, round((c1 - 1) * s + 1)), 'col_max', min(W0, round(c2 * s)));
-    info = struct('usable', usable, 'scale', s, 'opts', opts);
+    info = struct('usable', usable, 'dark', ~(inside & S >= opts.bright_min), 'scale', s, 'opts', opts);   % dark: outside the target or in shadow
 end

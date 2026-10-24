@@ -23,6 +23,15 @@ function cal = cisg_plate_calibrate(cfg)
 % is aligned with the wind, the plate may be slightly rotated.
 % cal.plate_to_tank (2x2, columns) maps plate-frame mm to tank mm.
 %
+% COORDINATE CONVENTION (tank frame, cm in the slope outputs).
+%   x: downwind = +image right (camera aligned with the wind); x = 0 on the laser-sheet line, which is the plate
+%      centre line along x (cfg.laser_x_px picks it; the IR cal's board centre is the true plate centre, so the
+%      lattice is placed with that corner line at x = 0).  The IR along-wind axis (image top -> bottom) must map
+%      to +x: check with cisg_check_colocation (IR +x direction vs CISG +x) after rebuilding with use_ir.
+%   y: +image up (cross-wind, handedness unchanged); the internal frame has y = 0 at a lattice line guessed
+%      from the image centre.  The channel centre y0 (wall edges of the run's reference, cisg_channel_center.m)
+%      is applied only at OUTPUT (X_cm/Y_cm, plots: y_out = y - y0), so IR <-> CISG mapping stays in the plate frame.
+%
 % The CISG sees only ~7 x 6 of the 10 x 9 inner corners (0.07 mm/px, 292 x
 % 219 mm), so detectCheckerboardPoints returns a SUB-BLOCK and its corner
 % ordering is that of the block, not of the board.  The block is therefore
@@ -51,6 +60,9 @@ function cal = cisg_plate_calibrate(cfg)
 %   lens_f_mm     35        lens focal length (only normalises r)
 %   pixel_um      5.5       pixel pitch
 %   ablated_bright true     SVG-black (engraved, anodising removed) squares are bright in the CISG image
+%   laser_x_px    NaN       x = 0 on the laser-sheet line: NaN = not set (x origin = lattice node nearest the image centre,
+%                           a guess that can be off by whole squares), [] = pick it interactively on the plate frame,
+%                           or an image column (px); the lattice is re-placed so the nearest corner line is x = 0
 %   use_ir        true      false = camera-only frame (new plate frames without an IR snap): tank x = image right,
 %                           y = image up, origin = plate lattice node nearest the image centre; no IR cal, no parity
 %                           or thick-axis checks (those need the IR snapshot)
@@ -71,7 +83,7 @@ function cal = cisg_plate_calibrate(cfg)
                  'out_path', fullfile(here, 'cisg_cal_CoreView_97.mat'), ...
                  'board', 'coarse', 'square_mm', [], 'scales', [0.5 0.25 0.125], 'sigma_px', [40 20 80], ...
                  'n_radial', 1, 'lens_f_mm', 35, 'pixel_um', 5.5, ...
-                 'ablated_bright', true, 'ablated_parity', 1, 'use_ir', true, 'frame_size', [3072 4100], 'show', false);
+                 'ablated_bright', true, 'ablated_parity', 1, 'use_ir', true, 'frame_size', [3072 4100], 'laser_x_px', NaN, 'show', false);
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
         if ~isfield(cfg, f{1}), cfg.(f{1}) = def.(f{1}); end
@@ -162,6 +174,22 @@ function cal = cisg_plate_calibrate(cfg)
     [~, ibest] = max(([opt.contrast]) * (2 * cfg.ablated_bright - 1));
     if ~cfg.use_ir, ibest = find([opt.jxx] > 0, 1); end   % camera frame: x = image right, no parity needed
     wp = opt(ibest).wp;
+
+    % Laser-sheet line = plate centre line = x = 0: the corner line under the laser is re-placed at x = 0
+    % (the guessed placement above can be off by whole 40 mm squares).  cfg.laser_x_px: NaN = not set (keep the
+    % guess), [] = pick interactively, number = image column; the pick snaps to the nearest corner line.
+    laser = struct('px', NaN, 'snapped_px', NaN, 'x_shift_mm', 0);
+    if isempty(cfg.laser_x_px) || ~isnan(cfg.laser_x_px)
+        xl = unique(round(wp(:,1) * 1e3) / 1e3);                       % x of the detected vertical corner lines (mm)
+        ul = arrayfun(@(x) median(pts(abs(wp(:,1) - x) < 1e-3, 1)), xl);   % their image columns
+        u = cfg.laser_x_px;
+        if isempty(u), u = pick_laser_column(I, ul); end
+        [~, il] = min(abs(ul - u));
+        laser = struct('px', u, 'snapped_px', ul(il), 'x_shift_mm', xl(il));
+        wp(:,1) = wp(:,1) - xl(il);                                    % x = 0 on the laser line
+        fprintf('  laser line at column %.0f px -> corner line at %.0f px, shifts the x origin by %+.0f mm (%+.0f squares)\n', ...
+                u, ul(il), xl(il), xl(il) / sq);
+    end
     fprintf('  axis options (contrast ablated - other, counts): %+.1f | %+.1f -> option %d\n', ...
             opt(1).contrast, opt(2).contrast, ibest);
 
@@ -194,6 +222,7 @@ function cal = cisg_plate_calibrate(cfg)
     cal.mm_per_px_center       = mm_per_px(cal, cal.plate_centre_px);
     cal.frame_path  = cfg.frame_path;
     cal.ir_cal_path = iff_(cfg.use_ir, cfg.ir_cal_path, '');
+    cal.laser_x_px = laser.px;  cal.laser_snapped_px = laser.snapped_px;  cal.laser_x_shift_mm = laser.x_shift_mm;
     cal.cfg = cfg;
 
     %% Plate frame -> camera-aligned tank frame
@@ -313,4 +342,14 @@ end
 
 function v = iff_(c, a, b)
     if c, v = a; else, v = b; end
+end
+
+function u = pick_laser_column(I, ul)
+    % show the plate frame with the detected vertical corner lines; click the laser-sheet line
+    fig = figure('Name', 'Pick the laser line', 'Position', [100 100 1300 950]);
+    imagesc(I(1:4:end, 1:4:end)); colormap(gray); axis image; hold on;
+    for k = 1:numel(ul), xline(ul(k) / 4, 'c-'); end
+    title({'Click the LASER-SHEET line (the plate centre line, vertical in the image); it snaps to the nearest corner line (cyan)'});
+    [u, ~] = ginput(1);  u = u * 4;
+    close(fig);
 end

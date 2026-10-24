@@ -1,7 +1,7 @@
-function [X_cm, Y_cm] = cisg_pixel_grid(cal, roi)
+function [X_cm, Y_cm] = cisg_pixel_grid(cal, roi, y0_cm)
 %CISG_PIXEL_GRID Tank coordinates (cm) of every CISG pixel in a ROI.
 %
-%   [X_cm, Y_cm] = cisg_pixel_grid(cal, roi)
+%   [X_cm, Y_cm] = cisg_pixel_grid(cal, roi, y0_cm)
 %
 % cal - cisg_plate_calibrate output (surf_px2world compatible)
 % roi - struct with row_min row_max col_min col_max (as cisg_main /
@@ -10,6 +10,7 @@ function [X_cm, Y_cm] = cisg_pixel_grid(cal, roi)
 % X_cm = along-wind, Y_cm = cross-wind (IR tank frame, origin at the plate
 % centre).  Both are single, size [nrows ncols] of the ROI.
 
+    if nargin < 3, y0_cm = 0; end                              % channel centre (cisg_channel_center): y_out = y - y0
     if isstruct(roi)
         roi = [roi.row_min roi.row_max roi.col_min roi.col_max];
     end
@@ -25,6 +26,6 @@ function [X_cm, Y_cm] = cisg_pixel_grid(cal, roi)
         [C, R] = meshgrid(cc(j), rr);
         xy = surf_px2world(cal, [C(:) R(:)]);              % mm
         X_cm(:, j) = single(reshape(xy(:,1), numel(rr), numel(j)) / 10);
-        Y_cm(:, j) = single(reshape(xy(:,2), numel(rr), numel(j)) / 10);
+        Y_cm(:, j) = single(reshape(xy(:,2), numel(rr), numel(j)) / 10 - y0_cm);
     end
 end

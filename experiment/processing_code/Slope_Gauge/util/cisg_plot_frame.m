@@ -13,6 +13,8 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
 %   lim_eta   []     symmetric eta limit (mm);      [] = 3 * rms eta of this frame
 %   q         16     display / integration block in full-resolution px
 %   blank     false  missing frame: all-NaN data, title is opts.head only
+%   sigma     []     struct(sx, sy, thr): ROI-sized slope uncertainties (info.sig_sx, sig_sy) and the mask threshold: draws the
+%                    threshold contour on the slope panels (off by default)
 %
 % Maps are in tank cm (x right, y up), eta (mm, relative) is integrated by
 % cisg_slope_to_eta.m.  info: rms_sx, rms_sy, rms_eta, masked, lim_s, lim_eta, nan_fraction.
@@ -30,7 +32,8 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
     [nrq, ncq] = size(eta);
     [Cq, Rq] = meshgrid(r.col_min + (0:ncq-1)*q + (q-1)/2, r.row_min + (0:nrq-1)*q + (q-1)/2);
     xy = surf_px2world(cal, [(Cq(:) - 0.5)*b + 0.5, (Rq(:) - 0.5)*b + 0.5]) / 10;   % cm
-    Xq = reshape(xy(:,1), size(Cq));  Yq = reshape(xy(:,2), size(Cq));
+    y0 = 0;  if isfield(setup, 'y0_cm'), y0 = setup.y0_cm; end             % channel centre line = y 0 (cisg_channel_center)
+    Xq = reshape(xy(:,1), size(Cq));  Yq = reshape(xy(:,2), size(Cq)) - y0;
     rsx = rms(Sx, 'all', 'omitnan');  rsy = rms(Sy, 'all', 'omitnan');  re = rms(eta(:));
     lim_s = opts.lim_s;    if isempty(lim_s),   lim_s = 3 * max(rsx, rsy); end
     if ~isfinite(lim_s) || lim_s <= 0, lim_s = 0.3; end              % blank (all-NaN) frame before limits are known
@@ -52,6 +55,14 @@ function info = cisg_plot_frame(fig, obs_image, Sx, Sy, setup, cal, opts)
         pcolor(Xq, Yq, double(maps{k}));  shading flat;  axis image;
         caxis(lims{k} * [-1 1]);  colormap(gca, cmap);  colorbar;
         set(gca, 'Color', [0.8 0.8 0.8]);  xlabel('x (cm)');  ylabel('y (cm)');  title(ttl{k});
+    end
+    if isfield(opts, 'sigma') && ~isempty(opts.sigma)                  % optional: contour of the slope uncertainty at the mask threshold (black)
+        fn = {'sx', 'sy'};
+        for k = 1:2
+            subplot(2, 2, k + 1);  hold on;
+            Z = opts.sigma.(fn{k})(q/2:q:nrq*q, q/2:q:ncq*q);
+            contour(Xq, Yq, double(Z), opts.sigma.thr * [1 1], 'k-', 'LineWidth', 1);
+        end
     end
     masked = 100 * mean(isnan(Sx), 'all');
     if isfield(opts, 'blank') && opts.blank

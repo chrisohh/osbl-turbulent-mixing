@@ -9,6 +9,9 @@ function [ref_b, setup_b] = cisg_bin_setup(ref_image, setup, bin)
 % physical scales stay the same.
 
     ref_b = ref_image;  setup_b = setup;
+    if isfield(setup, 'noise') && ~isempty(setup.noise) && setup.noise.bin ~= bin
+        warning('cisg_bin_setup:noise', 'Noise estimated at bin %d but used at bin %d: precision mask is approximate', setup.noise.bin, bin);
+    end
     if bin == 1, return; end
     ref_b = uint8(imresize(ref_image, 1 / bin, 'box'));
     setup_b.cm_per_pixel_x = setup.cm_per_pixel_x * bin;
@@ -20,4 +23,7 @@ function [ref_b, setup_b] = cisg_bin_setup(ref_image, setup, bin)
     setup_b.roi = struct('row_min', ceil(r.row_min / bin), 'row_max', floor(r.row_max / bin), ...
                          'col_min', ceil(r.col_min / bin), 'col_max', floor(r.col_max / bin));
     % pattern_scale is the pattern/surface size ratio: unchanged
+    if isfield(setup, 'dark_mask') && ~isempty(setup.dark_mask)
+        setup_b.dark_mask = imresize(setup.dark_mask, [size(ref_b, 1) size(ref_b, 2)], 'nearest') > 0;
+    end
 end

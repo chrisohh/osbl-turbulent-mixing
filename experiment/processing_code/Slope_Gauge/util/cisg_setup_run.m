@@ -9,7 +9,7 @@ function R = cisg_setup_run(cfg)
 % cfg fields (defaults):
 %   coreview_num  95
 %   ref_frame     1          still-water reference = this frame of the run
-%   roi_mode      'default'  'default' (central 60%), 'auto' (from the reference, see cisg_auto_roi; auto_margin px inset),
+%   roi_mode      'default'  'default' (central 60%), 'full' (whole image, dark / off-target pixels of the reference masked), 'auto' (from the reference, see cisg_auto_roi; auto_margin px inset),
 %                            'pick' (interactive) or a roi struct
 %   roi_file      ''         'pick': where the picked ROI is saved / reused
 %                            ('' = calibration/cisg_roi_CoreView_<N>.mat)
@@ -64,6 +64,15 @@ function R = cisg_setup_run(cfg)
     setup.L_eff_cm      = depth.L_eff_mm / 10;
     setup.pattern_scale = depth.r;
     setup.target_cols   = depth.edge_cols;
+    % channel centre line (y = 0 in the outputs) from the wall edges of this reference; plate centre if not detectable
+    cc = cisg_channel_center(ref_image, cal, setup);
+    setup.y0_cm = cc.y0_cm;
+    if ~isfinite(setup.y0_cm)
+        warning('cisg_setup_run:y0', 'Wall edges not both detected in the reference (top %d, bottom %d): y = 0 stays at the plate-lattice centre.', cc.found_top, cc.found_bottom);
+        setup.y0_cm = 0;
+    else
+        fprintf('channel centre: wall edges rows %.0f / %.0f, apparent midpoint %.2f cm, y0 = %.2f cm (plate-lattice y = 0)\n', cc.top_row, cc.bottom_row, cc.mid_apparent_cm, setup.y0_cm);
+    end
 
     roi_default = struct('row_min', round(0.2*h), 'row_max', round(0.8*h), ...
                          'col_min', round(0.2*w), 'col_max', round(0.8*w));
@@ -73,6 +82,10 @@ function R = cisg_setup_run(cfg)
         % ROI that avoids what is already unusable in the reference (wall shadow, flat colour map)
         setup.roi = cisg_auto_roi(ref_image, setup, struct('margin_px', cfg.auto_margin));
         fprintf('auto ROI: rows %d-%d, cols %d-%d\n', setup.roi.row_min, setup.roi.row_max, setup.roi.col_min, setup.roi.col_max);
+    elseif strcmp(cfg.roi_mode, 'full')
+        % the whole image; only data-limited areas stay empty (dark / outside the target in the reference + solver mask)
+        setup.roi = struct('row_min', 1, 'row_max', h, 'col_min', 1, 'col_max', w);
+        setup.dark_mask = cisg_ref_dark(ref_image, setup);
     elseif strcmp(cfg.roi_mode, 'default')
         setup.roi = roi_default;
     else
@@ -98,5 +111,8 @@ function R = cisg_setup_run(cfg)
     roi_centre = [mean([setup.roi.col_min setup.roi.col_max]) mean([setup.roi.row_min setup.roi.row_max])];
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal, roi_centre);
 
-    R.setup = setup;  R.cal = cal;  R.depth = depth;  R.ref_image = ref_image;  R.img_size = [h w];
+    % camera noise of the smoothed colours (two early frames) -> physical precision mask (setup.max_slope_sigma, slope units)
+    setup.noise = cisg_noise_estimate(R.frame_file, cfg.bin, setup.colour_sigma / cfg.bin, [1 3], [h w]);
+    setup.max_slope_sigma = 0.02;
+    R.setup = setup;  R.cal = cal;  R.depth = depth;  R.ref_image = ref_image;  R.img_size = [h w];  R.channel = cc;
 end

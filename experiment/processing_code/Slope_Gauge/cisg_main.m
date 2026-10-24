@@ -8,7 +8,7 @@ addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'IR Camera', 'calibrati
 coreview_num = 95;
 coreview_ref_num = coreview_num;   % still-water reference = frame 1 of the run being processed
 ref_frame    = 1;
-roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%), 'auto' (from the reference, see cisg_auto_roi) or a roi struct
+roi_mode     = 'pick';             % 'pick' (interactive), 'default' (central 60%), 'full' (whole image), 'auto' (from the reference, see cisg_auto_roi) or a roi struct
 auto_margin  = 0;                  % 'auto': extra inset in px (100 keeps shifted pixels on usable colours)
 dye_model    = '';                 % '' = by run (cisg_run_defaults), or 'none' / 'joint'
 start_frame  = 1000;               % cache build: first and last frame (every 10th)
@@ -102,6 +102,13 @@ depth = cisg_apparent_depth(ref_image, cal, depth_cfg);
 setup.L_eff_cm       = depth.L_eff_mm / 10;
 setup.pattern_scale  = depth.r;            % pattern px size = surface px size * r
 setup.target_cols    = depth.edge_cols;
+setup.noise = cisg_noise_estimate(@(n) fullfile(obs_folderName, sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_%04d.raw', coreview_num, n)), 1, setup.colour_sigma, [1 3], [img_height img_width]);
+setup.max_slope_sigma = 0.02;        % mask pixels whose slope uncertainty (camera noise propagated through J^-1) exceeds this
+% channel centre line (y = 0 in X_cm/Y_cm and the plots) from the wall edges of the reference (cisg_channel_center)
+channel = cisg_channel_center(ref_image, cal, setup);
+setup.y0_cm = channel.y0_cm;
+if ~isfinite(setup.y0_cm), warning('Wall edges not both detected: y = 0 stays at the plate-lattice centre'); setup.y0_cm = 0; end
+fprintf('channel centre y0 = %.2f cm (wall edges rows %.0f / %.0f)\n', setup.y0_cm, channel.top_row, channel.bottom_row);
 fprintf('H = %.1f cm, r = %.3f, L_eff = %.1f cm (slopes); h_est = %.1f cm vs typed water_depth %.1f cm (h_est assumes glass/air-gap values, check only)\n', ...
         depth.H_mm/10, depth.r, setup.L_eff_cm, depth.h_est_mm/10, setup.water_depth);
 
@@ -111,6 +118,9 @@ if isstruct(roi_mode)
 elseif strcmp(roi_mode, 'auto')
     setup.roi = cisg_auto_roi(ref_image, setup, struct('margin_px', auto_margin));
     fprintf('auto ROI: rows %d-%d, cols %d-%d\n', setup.roi.row_min, setup.roi.row_max, setup.roi.col_min, setup.roi.col_max);
+elseif strcmp(roi_mode, 'full')            % whole image; dark / off-target pixels of the reference masked (cisg_ref_dark)
+    setup.roi = struct('row_min', 1, 'row_max', img_height, 'col_min', 1, 'col_max', img_width);
+    setup.dark_mask = cisg_ref_dark(ref_image, setup);
 elseif strcmp(roi_mode, 'default')
     setup.roi = struct('row_min', round(0.2*img_height), 'row_max', round(0.8*img_height), ...
                        'col_min', round(0.2*img_width),  'col_max', round(0.8*img_width));
@@ -139,7 +149,7 @@ if preview_only
         struct('head', sprintf('CoreView %d, frame %d, t = %.2f s, %.1f s', coreview_num, preview_frame, (preview_frame-1)*dt, t_prev)));
     return;   % nothing below runs: no mkdir, metadata or frame cache
 end
-[X_cm, Y_cm] = cisg_pixel_grid(cal, setup.roi);
+[X_cm, Y_cm] = cisg_pixel_grid(cal, setup.roi, setup.y0_cm);
 
 %% Process frames — write per-frame ROI-cropped cache (resumable)
 raw_pattern = sprintf('CoreView_%d_Flare 12M125 CCL C1112A00_*.raw', coreview_num);
@@ -155,10 +165,11 @@ time = (1:totalFrames - 1) * dt;
 out_root = cache_root;
 out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
 if strcmp(setup.dye_model, 'joint'), out_dir = [out_dir '_joint2']; end    % 2-channel and joint slopes never share a cache
+out_dir = [out_dir '_sigma'];                                       % v3 masks: physical precision (sigma_S), despeckle, dark mask
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...
-     'coreview_num', 'img_height', 'img_width', 'X_cm', 'Y_cm', 'cal', 'depth');
+     'coreview_num', 'img_height', 'img_width', 'X_cm', 'Y_cm', 'cal', 'depth', 'channel');
 fprintf('Wrote metadata: %s\n', fullfile(out_dir, 'metadata.mat'));
 %%
 frames_to_process = start_frame:10:end_frame;
@@ -193,13 +204,17 @@ for count = 1:nFrames
     Sx = single(sx_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
     Sy = single(sy_full(r.row_min:r.row_max, r.col_min:r.col_max)); %#ok<NASGU>
     t  = time(count);                                               %#ok<NASGU>
+    vars = {'Sx', 'Sy', 'n', 't'};
     if ~isempty(sinfo) && ~isempty(sinfo.dye_c)                       % joint model: dye amount, every 4th px
         c4 = single(sinfo.dye_c(r.row_min:4:r.row_max, r.col_min:4:r.col_max)); %#ok<NASGU>
         a4 = uint8(sinfo.dye_applied(r.row_min:4:r.row_max, r.col_min:4:r.col_max)); %#ok<NASGU>   % where the joint correction applied
-        save(frame_path, 'Sx', 'Sy', 'c4', 'a4', 'n', 't', '-v7');
-    else
-        save(frame_path, 'Sx', 'Sy', 'n', 't', '-v7');
+        vars = [vars {'c4', 'a4'}];
     end
+    if ~isempty(sinfo) && isfield(sinfo, 'sig_sx') && ~isempty(sinfo.sig_sx)    % slope uncertainty (precision mask), every 4th px
+        sgx4 = single(sinfo.sig_sx(1:4:end, 1:4:end));  sgy4 = single(sinfo.sig_sy(1:4:end, 1:4:end)); %#ok<NASGU>
+        vars = [vars {'sgx4', 'sgy4'}];
+    end
+    save(frame_path, vars{:}, '-v7');
     n_done = n_done + 1;
 
     if mod(count, 25) == 0
