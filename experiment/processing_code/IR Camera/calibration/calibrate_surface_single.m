@@ -59,6 +59,16 @@ function cal = calibrate_surface_single(snap_path, opts)
 %   wall_band_px     25       search half-width around the predicted wall
 %   out_path         calibration/surface_cal_<snap name>.mat ('' = no save)
 %   show             true
+%   seed_clicks      false    SEEDED MODE for boards the automatic detector cannot find (strong barrel distortion, reflections):
+%                             click the 4 outer INNER corners of the board in the order TL, TR, BR, BL as displayed; all
+%                             9 x 10 inner corners are then predicted (homography, then homography + radial k) and refined
+%                             with a subpixel saddle finder (3 passes; corners that fail or fit badly are dropped).
+%                             Board orientation: TL = lattice corner (1,1) of generateCheckerboardPoints(bs): board x
+%                             grows to the image right along the 10 inner corners, board y down along the 9; this is the
+%                             order detectCheckerboardPoints gave on Snap-000096.  Tank axes (board_to_tank) are still
+%                             chosen from the image orientation below, so downstream code is unaffected.
+%   seed_pts         []       4 x 2 [u v] seeds (TL TR BR BL) instead of clicking (re-runs, tests)
+%   seed_path        calibration/seed_pts_<snap name>.mat (clicks are saved; reused unless repick = true)
 %   square_mm        []       MEASURED corner-to-corner pitch; [] = design
 %                             (calib_target_params). Measure across many
 %                             squares (e.g. 10 = 400 mm design) or caliper the
@@ -77,7 +87,8 @@ def = struct('frame_idx', 1, 'focal_px', 520, 'fit_center', false, 'n_radial', 2
     'repick', false, 'wall_image', [], 'line_weight', 1, ...
     'auto_walls', true, 'wall_band_px', 25, ...
     'out_path', fullfile(here, ['surface_cal_' snap_name '.mat']), ...
-    'show', true, 'square_mm', []);
+    'show', true, 'square_mm', [], ...
+    'seed_clicks', false, 'seed_pts', [], 'seed_path', fullfile(here, ['seed_pts_' snap_name '.mat']));
 fn = fieldnames(def);
 for i = 1:numel(fn)
     if ~isfield(opts, fn{i}), opts.(fn{i}) = def.(fn{i}); end
@@ -89,15 +100,22 @@ target = calib_target_params('coarse');
 %% ---- Load + detect ----
 frame = read_calib_frame(snap_path, opts.frame_idx);
 image_size = size(frame);
-[pts, bs] = detect_board(frame, [target.n_rows target.n_cols], opts.flat);
+if isempty(opts.square_mm), opts.square_mm = target.square_mm; end
+if opts.seed_clicks
+    [pts, bs] = detect_board_seeded(frame, target, opts, snap_name);   % NaN rows = corners that did not lock
+else
+    [pts, bs] = detect_board(frame, [target.n_rows target.n_cols], opts.flat);
+end
 fprintf('Detected %d corners (board %dx%d squares) in %s\n', ...
-    size(pts,1), bs(1), bs(2), snap_name);
+    nnz(all(isfinite(pts), 2)), bs(1), bs(2), snap_name);
 
 % Board-local corner coordinates, centred on the board
-if isempty(opts.square_mm), opts.square_mm = target.square_mm; end
 fprintf('Corner pitch %.3f mm (design %.1f mm)\n', opts.square_mm, target.square_mm);
 wp = generateCheckerboardPoints(bs, opts.square_mm);
 wp = wp - mean(wp, 1);
+if opts.seed_clicks                                       % keep only the corners that locked
+    keep = all(isfinite(pts), 2);  pts = pts(keep, :);  wp = wp(keep, :);
+end
 
 %% ---- Fit [k1..kn (cx cy)] with H solved linearly inside ----
 cal0.center     = ([image_size(2) image_size(1)] + 1) / 2;
@@ -557,4 +575,142 @@ yg = max(ceil(bb(3)), -y_lim) : dx : min(floor(bb(4)), y_lim);
 p = surf_world2px(cal, [X(:) Y(:)]);
 R = interp2(double(frame), reshape(p(:,1), size(X)), reshape(p(:,2), size(X)), ...
     'linear', NaN);
+end
+
+
+%% =====================================================================
+function [pts, bs] = detect_board_seeded(frame, target, opts, snap_name)
+% SEEDED corner detection (opts.seed_clicks): 4 seeds -> predicted lattice -> subpixel saddle refinement,
+% iterated through the radial model.  Returns pts [90 x 2] in generateCheckerboardPoints order (board x
+% slowest along the 10 inner corners to the image right, board y fastest along the 9 down, TL = point 1)
+% with NaN rows where a corner did not lock, and bs = [n_rows n_cols] squares.
+flat = opts.flat;  if isempty(flat), flat = 0; end
+f = double(frame) - double(flat);
+u8 = local_normalize(f, 20);
+img = double(u8) / 255;
+
+nr = target.inner_rows;  nc = target.inner_cols;                % 9 x 10 inner corners
+bs = [target.n_rows target.n_cols];
+seeds = get_seeds(u8, opts, snap_name);                         % 4 x 2: TL TR BR BL as displayed
+
+[ix, iy] = meshgrid(1:nc, 1:nr);
+L  = [ix(:) iy(:)];                                             % lattice order of generateCheckerboardPoints (y fastest)
+wp = (L - mean(L, 1)) * opts.square_mm;
+tf = fitgeotrans([1 1; nc 1; nc nr; 1 nr], seeds, 'projective');
+P  = transformPointsForward(tf, L);                             % first prediction (4-corner homography)
+
+image_size = size(frame);
+cal = struct('center', ([image_size(2) image_size(1)] + 1) / 2, 'focal_px', opts.focal_px, ...
+             'k', zeros(1, opts.n_radial), 'T', eye(3), 'image_size', image_size);
+Q = nan(size(P));
+keep = false(size(P, 1), 1);
+for pass = 1:3
+    s_loc = local_square(P, nr, nc);                            % px per square at every corner
+    rad = (0.45 - 0.1 * (pass > 1)) * s_loc;                    % search radius: wide first, then tight
+    Q = refine_corners(img, P, rad, s_loc);
+    ok = all(isfinite(Q), 2);
+    if nnz(ok) < 12
+        error('calibrate_surface_single:seeded', 'Only %d corners refined near the seeds; check the clicks.', nnz(ok));
+    end
+    keep = ok;
+    for rep = 1:2                                               % fit, drop outliers, refit
+        theta = fminsearch(@(th) reproj_rms(th, Q(keep,:), wp(keep,:), cal, false), [-0.05 zeros(1, opts.n_radial - 1)], ...
+                optimset('TolX', 1e-8, 'TolFun', 1e-8, 'MaxFunEvals', 3000, 'MaxIter', 3000));
+        cal.k = theta(1:opts.n_radial);
+        cal = refit_T(cal, Q(keep,:), wp(keep,:));
+        res = sqrt(sum((surf_world2px(cal, wp) - Q).^2, 2));
+        thr = max(3 * median(res(keep), 'omitnan'), 1.0);
+        keep = ok & res <= thr;
+    end
+    P = surf_world2px(cal, wp);                                 % re-predict ALL corners through the distortion model
+    fprintf('  seeded pass %d: %d refined, %d kept (rms %.2f px, outlier limit %.2f px)\n', pass, nnz(ok), nnz(keep), ...
+            sqrt(mean(res(keep).^2)), thr);
+end
+pts = Q;  pts(~keep, :) = NaN;
+end
+
+function seeds = get_seeds(u8, opts, snap_name)
+% 4 clicks (or opts.seed_pts); saved with the other picks and reused unless repick = true
+seeds = opts.seed_pts;
+redo = (islogical(opts.repick) && isscalar(opts.repick) && opts.repick) || iscell(opts.repick);
+if isempty(seeds) && isfile(opts.seed_path) && ~redo
+    S = load(opts.seed_path, 'seed_pts');
+    seeds = S.seed_pts;
+    fprintf('Loaded seed clicks from %s\n', opts.seed_path);
+end
+if isempty(seeds)
+    fig = figure('Name', ['Seed clicks ' snap_name], 'Position', [100 50 1100 880]);
+    imagesc(u8); colormap(gray); axis image; hold on;
+    title({'Click the 4 OUTER INNER CORNERS of the board in this order (as displayed):', ...
+           '1 = top-left, 2 = top-right, 3 = bottom-right, 4 = bottom-left   (the outermost interior crossing, not the board edge)'});
+    [u, v] = ginput(4);
+    close(fig);
+    seeds = [u v];
+    seed_pts = seeds; %#ok<NASGU>
+    save(opts.seed_path, 'seed_pts');
+    fprintf('Saved seed clicks to %s\n', opts.seed_path);
+end
+if ~isequal(size(seeds), [4 2]), error('calibrate_surface_single:seeds', 'seed_pts must be 4 x 2 [u v].'); end
+end
+
+function s = local_square(P, nr, nc)
+% local square size (px) at each predicted corner: mean distance to its lattice neighbours
+X = reshape(P(:,1), nr, nc);  Y = reshape(P(:,2), nr, nc);
+dx = hypot(diff(X, 1, 2), diff(Y, 1, 2));   dy = hypot(diff(X, 1, 1), diff(Y, 1, 1));
+sx = zeros(nr, nc);  sy = zeros(nr, nc);  cx = zeros(nr, nc);  cy = zeros(nr, nc);
+sx(:, 1:end-1) = dx;  cx(:, 1:end-1) = 1;  sx(:, 2:end) = sx(:, 2:end) + dx;  cx(:, 2:end) = cx(:, 2:end) + 1;
+sy(1:end-1, :) = dy;  cy(1:end-1, :) = 1;  sy(2:end, :) = sy(2:end, :) + dy;  cy(2:end, :) = cy(2:end, :) + 1;
+s = (sx ./ cx + sy ./ cy) / 2;
+s = s(:);
+end
+
+function Q = refine_corners(img, P, rad, s_loc)
+% Subpixel checker-corner refinement around each prediction P: strongest saddle (-det Hessian) within rad,
+% then cornerSubPix-style gradient-orthogonality iterations in a window of ~0.35 square; a corner must show the
+% alternating 4-square contrast, else NaN.
+[H, W] = size(img);
+sg = max(1.2, 0.1 * median(s_loc));
+G = imgaussfilt(img, sg);
+[gx, gy] = imgradientxy(G, 'central');
+[gxx, gxy] = imgradientxy(gx, 'central');
+[~, gyy] = imgradientxy(gy, 'central');
+sad = -(gxx .* gyy - gxy.^2);                                   % > 0 at a saddle (checker corner)
+G2 = imgaussfilt(img, 1.0);
+[g2x, g2y] = imgradientxy(G2, 'central');
+Q = nan(size(P));
+for k = 1:size(P, 1)
+    r = rad(k);
+    u0 = round(P(k,1));  v0 = round(P(k,2));
+    ru = ceil(r);
+    uu = max(1, u0 - ru):min(W, u0 + ru);  vv = max(1, v0 - ru):min(H, v0 + ru);
+    if numel(uu) < 5 || numel(vv) < 5, continue; end
+    [UU, VV] = meshgrid(uu, vv);
+    inside = (UU - P(k,1)).^2 + (VV - P(k,2)).^2 <= r^2;
+    S = sad(vv, uu);  S(~inside) = -Inf;
+    [m, i] = max(S(:));
+    if ~isfinite(m) || m <= 0, continue; end
+    q = [UU(i) VV(i)];
+    w = max(4, round(0.35 * s_loc(k)));                          % refinement window half size
+    for it = 1:4
+        cu = round(q(1));  cv = round(q(2));
+        ua = max(1, cu - w):min(W, cu + w);  va = max(1, cv - w):min(H, cv + w);
+        [Ua, Va] = meshgrid(ua, va);
+        wgt = exp(-((Ua - q(1)).^2 + (Va - q(2)).^2) / (2 * (w / 2)^2));
+        gxw = g2x(va, ua);  gyw = g2y(va, ua);
+        A11 = sum(wgt(:) .* gxw(:).^2);  A12 = sum(wgt(:) .* gxw(:) .* gyw(:));  A22 = sum(wgt(:) .* gyw(:).^2);
+        b1 = sum(wgt(:) .* (gxw(:).^2 .* Ua(:) + gxw(:) .* gyw(:) .* Va(:)));
+        b2 = sum(wgt(:) .* (gxw(:) .* gyw(:) .* Ua(:) + gyw(:).^2 .* Va(:)));
+        d = A11 * A22 - A12^2;
+        if d < eps, q = [NaN NaN]; break; end
+        qn = [(A22 * b1 - A12 * b2) (A11 * b2 - A12 * b1)] / d;
+        if norm(qn - q) > 0.5 * s_loc(k), q = [NaN NaN]; break; end
+        q = qn;
+    end
+    if any(isnan(q)) || norm(q - [P(k,1) P(k,2)]) > r * 1.2, continue; end
+    s = s_loc(k);                                                % alternating-square contrast at the corner
+    c4 = [interp2(G, q(1) + s/2, q(2) + s/2) interp2(G, q(1) - s/2, q(2) - s/2) ...
+          interp2(G, q(1) + s/2, q(2) - s/2) interp2(G, q(1) - s/2, q(2) + s/2)];
+    if abs(mean(c4(1:2)) - mean(c4(3:4))) < 0.08, continue; end
+    Q(k, :) = q;
+end
 end

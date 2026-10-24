@@ -83,7 +83,7 @@ function cal = cisg_plate_calibrate(cfg)
                  'out_path', fullfile(here, 'cisg_cal_CoreView_97.mat'), ...
                  'board', 'coarse', 'square_mm', [], 'scales', [0.5 0.25 0.125], 'sigma_px', [40 20 80], ...
                  'n_radial', 1, 'lens_f_mm', 35, 'pixel_um', 5.5, ...
-                 'ablated_bright', true, 'ablated_parity', 1, 'use_ir', true, 'frame_size', [3072 4100], 'laser_x_px', NaN, 'show', false);
+                 'ablated_bright', true, 'ablated_parity', 1, 'use_ir', true, 'frame_size', [3072 4100], 'laser_x_px', NaN, 'orientation_checked', false, 'orientation_rule', '', 'show', false);
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
         if ~isfield(cfg, f{1}), cfg.(f{1}) = def.(f{1}); end
@@ -222,6 +222,7 @@ function cal = cisg_plate_calibrate(cfg)
     cal.mm_per_px_center       = mm_per_px(cal, cal.plate_centre_px);
     cal.frame_path  = cfg.frame_path;
     cal.ir_cal_path = iff_(cfg.use_ir, cfg.ir_cal_path, '');
+    cal.orientation_rule = cfg.orientation_rule;  if isempty(cal.orientation_rule), cal.orientation_rule = 'parity (consistent with wind direction)'; end
     cal.laser_x_px = laser.px;  cal.laser_snapped_px = laser.snapped_px;  cal.laser_x_shift_mm = laser.x_shift_mm;
     cal.cfg = cfg;
 
@@ -234,6 +235,17 @@ function cal = cisg_plate_calibrate(cfg)
     p0  = cal.plate_centre_px;
     Jp0 = [surf_world2px(cal, [1 0]) - p0; surf_world2px(cal, [0 1]) - p0]';  % d(u,v)/d(plate x,y)
     theta = atan2d(-Jp0(2,1), Jp0(1,1));
+    if cfg.use_ir && ~cfg.orientation_checked
+        % physical constraint: the camera is aligned with the wind and IR +x (along-wind) must map to CISG image right
+        if abs(theta) > 135       % parity chose the wrong 180 deg option: take the other one
+            fprintf('  parity overridden by wind-direction constraint (theta %+.1f deg, parity contrast %+.1f counts)\n', theta, opt(ibest).contrast);
+            cfg2 = cfg;  cfg2.ablated_parity = 1 - cfg.ablated_parity;  cfg2.orientation_checked = true;
+            cfg2.orientation_rule = sprintf('parity overridden by wind-direction constraint (parity gave theta %+.1f deg, contrast %+.1f)', theta, opt(ibest).contrast);
+            cal = cisg_plate_calibrate(cfg2);  return;
+        elseif abs(theta) > 45
+            error('cisg_plate_calibrate:axes', 'theta = %+.1f deg: an axis swap, not a parity issue (IR +x does not map to the CISG image right).', theta);
+        end
+    end
     Rot = [cosd(theta) -sind(theta); sind(theta) cosd(theta)];
     cal.theta_deg       = theta;
     cal.plate_to_tank   = Rot;

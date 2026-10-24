@@ -10,15 +10,17 @@
 % assumption, parity) is NOT tested here: it cannot be seen from corners.
 %
 % Writes calibration/cisg_colocation_check.png.
-clear; clc;
+clearvars -except run_num; clc;                    % run_num = 95 (default), 96 or 101: uses that run's plate cal and IR snapshot cal
+if ~exist('run_num', 'var'), run_num = 95; end
 here = fileparts(mfilename('fullpath'));
 if isempty(here), here = pwd; end
 sg = fileparts(here);
-addpath(here, sg, fullfile(fileparts(sg), 'IR Camera', 'calibration'));
+addpath(here, sg, fullfile(sg, 'util'), fullfile(fileparts(sg), 'IR Camera', 'calibration'));
 
 %% ---- 1. Calibrate ----
-cfg = struct();                                   % defaults: CoreView 97 plate frame, Snap-000096
-cal_cisg = cisg_plate_calibrate(cfg);
+rd = cisg_run_defaults(run_num);
+S = load(fullfile(here, sprintf('cisg_cal_CoreView_%d.mat', rd.plate)), 'cal');   % the saved cal (not recalibrated here)
+cal_cisg = S.cal;
 S = load(cal_cisg.ir_cal_path, 'cal');
 cal_ir = S.cal;
 
@@ -46,7 +48,7 @@ fprintf('  CISG fit %.3f px rms; IR fit %.3f px rms; CISG %.5f mm/px\n', ...
         cal_cisg.rms_px, cal_ir.rms_px, cal_cisg.mm_per_px_center);
 
 %% ---- 3. Overlay ----
-I = double(rgb2gray(cisg_load_coreview(cal_cisg.frame_path)));
+I = double(rgb2gray(cisg_load_coreview(cal_cisg.frame_path, [3072 4100])));
 fig = figure('Visible', 'off', 'Position', [100 100 1100 850]);
 imagesc(I); colormap(gray); axis image; hold on;
 h1 = plot(cal_cisg.image_points(:,1), cal_cisg.image_points(:,2), 'g+', 'MarkerSize', 10, 'LineWidth', 1.2);
@@ -73,7 +75,7 @@ legend([h1 h2 h3 h4 h5 h6], {'CISG corners', 'IR corners mapped', 'tank axes (ca
        'Color', [0.2 0.2 0.2], 'TextColor', 'w');
 title(sprintf('CISG plate frame: CISG corners (g+) vs IR corners mapped (ro); mean %.2f px, max %.2f px', mean(r_px), max(r_px)));
 xlabel('u (px)'); ylabel('v (px)');
-png = fullfile(here, 'cisg_colocation_check.png');
+png = fullfile(here, 'cisg_colocation_check.png');  if rd.plate ~= 97, png = fullfile(here, sprintf('cisg_colocation_check_%d.png', rd.plate)); end
 exportgraphics(fig, png, 'Resolution', 100);
 close(fig);
 fprintf('Saved %s\n', png);

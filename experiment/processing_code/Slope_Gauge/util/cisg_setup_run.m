@@ -18,6 +18,7 @@ function R = cisg_setup_run(cfg)
 %   dye_model     ''         '' = by run (cisg_run_defaults: 'joint' for the R6G runs 95, 96, else 'none'); or 'none' | 'joint'
 %   raw_root      'D:\HLAB_2026\Core'
 %   fs            50         frame rate (Hz)
+%   bin           2          bin factor the noise estimate (precision mask) is made for (cisg_slope_video passes cfg.bin)
 %   setup         struct     fields overriding the defaults below (colour_map, colour_sigma, ...)
 %
 % R fields: setup, cal, depth, ref_image, obs_folder, frame_file (@(n) path), dt, img_size
@@ -27,7 +28,7 @@ function R = cisg_setup_run(cfg)
     addpath(fullfile(sg, 'calibration'), fullfile(fileparts(sg), 'IR Camera', 'calibration'));
 
     def = struct('coreview_num', 95, 'ref_frame', 1, 'roi_mode', 'default', ...
-                 'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'cal_path', '', 'dye_model', '', ...
+                 'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'bin', 2, 'cal_path', '', 'dye_model', '', ...
                  'raw_root', 'D:\HLAB_2026\Core', 'fs', 50, 'setup', struct());
     if nargin < 1, cfg = struct(); end
     for f = fieldnames(def).'
