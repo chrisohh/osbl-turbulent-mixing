@@ -6,7 +6,7 @@
 % single Sx, Sy), so re-rendering is cheap and the cache is shared.  bin > 1 uses a
 % separate folder (..._bin<B>).  Colour limits are fixed over the video (given, or
 % +-3 rms of the first rendered frame).
-clear; close all;
+clearvars -except cfg_override; close all;   % cfg_override: set by cisg_pipeline.m, replaces the user settings below
 worker_gb = 1.5;                    % estimated peak RAM per parallel worker at bin 2 (GB); adjust to your measurement
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, 'util'));
@@ -35,11 +35,38 @@ cfg.use_parfor   = true;           % compute missing slopes in parallel (needs c
 cfg.n_workers    = 'auto';         % 'auto' = min(cores - 4, 0.6 * free RAM / worker_gb, 32), or a number
 cfg.show_live    = true;           % show the frame being computed / written (falls back to false without a desktop, e.g. matlab -batch)
 cfg.bad_frame    = 'blank';        % unreadable raw file: 'blank' (empty panels, title says MISSING), 'hold' (repeat the previous good frame) or 'skip' (no video frame)
+cfg.warm_start   = false;          % true: start the colour solver from the previous frame's shift too (and from 0; per pixel the better one); own cache folder (_warm).
+                                   % Off: on run 101 frame 2000 it cut the masked area only 35.6% -> 33.9% for ~3x the compute (cisg_pipeline 5c)
+cfg.show_series  = true;           % wind (hot-wire, or fan command) and wave-gauge time series under the maps, red line = frame (cisg_wind_wave_series)
+cfg.series_xlim  = [];             % time axis of those panels (s since wind start); [] = whole record
+cfg.warm_lead    = 3;             % frames solved (not saved) before a frame whose previous frame is not available (stride > 1, start of a parallel block)
+cfg.ref_frames   = 2:4:58;         % still-water reference = median of these frames (1 = the old single frame 1, which is ~0.8 counts off on run 101)
+cfg.bias_frames  = 60:10:200;      % flat-water frames whose mean slope (fixed bias) is subtracted from every frame; [] = off (cisg_flat_bias)
+cfg.drift_corr   = 'none';         % per-frame brightness correction before the inversion: 'none' | 'offset' | 'gain' (cisg_colour_displacement)
+cfg.colour_channels = 'RG';        % 'RG' | 'RGB' | 'hybrid' (R, G; R, G, B only where R, G fails or folds). Blue: dye-free runs only (cisg_pipeline 5f / 5h / 5i)
+if exist('cfg_override', 'var')
+    for f_ = fieldnames(cfg_override).', cfg.(f_{1}) = cfg_override.(f_{1}); end
+    clear cfg_override f_
+end
 
 %% ---------------- Setup ----------------
 R = cisg_setup_run(struct('coreview_num', cfg.coreview_num, 'roi_mode', cfg.roi_mode, ...
-                          'roi_repick', cfg.roi_repick, 'auto_margin', cfg.auto_margin, 'dye_model', cfg.dye_model, 'setup', struct('dye_mask', cfg.dye_mask)));
+                          'roi_repick', cfg.roi_repick, 'auto_margin', cfg.auto_margin, 'dye_model', cfg.dye_model, 'setup', struct('dye_mask', cfg.dye_mask, 'drift_corr', cfg.drift_corr, 'colour_channels', cfg.colour_channels), ...
+                          'ref_frames', cfg.ref_frames, 'bin', cfg.bin));
 [ref_b, setup_b] = cisg_bin_setup(R.ref_image, R.setup, cfg.bin);
+setup_b = cisg_flat_bias(R, ref_b, setup_b, cfg.bin, cfg.bias_frames);   % fixed flat-water bias, subtracted in cisg_cache_frame
+% frame time in the titles: since wind (fan) start when the run has a wind clock, plus since camera start
+if isfinite(R.cam_delay_s)
+    tstr = @(n) sprintf('t = %.2f s after wind start (camera %.2f s)', R.t_wind(n), (n - 1) * R.dt);
+else
+    tstr = @(n) sprintf('t = %.2f s after camera start (no wind clock)', (n - 1) * R.dt);
+end
+ts = [];
+if cfg.show_series && isfinite(R.cam_delay_s)
+    ts = cisg_wind_wave_series(cfg.coreview_num);
+    if isempty(ts.wind) && isempty(ts.wave), ts = []; end
+    if ~isempty(ts), cfg.fig_size = max(cfg.fig_size, [1600 1000]); end   % raw | Sx | Sy across, series below
+end
 frames = cfg.frames;
 bad_list = [];  bad_msgs = {};                       % frames whose raw file could not be read
 live = cfg.show_live && usejava('desktop');
@@ -50,6 +77,15 @@ if cfg.cache_slopes
     if cfg.bin > 1, sub = sprintf('%s_bin%d', sub, cfg.bin); end
     if strcmp(R.setup.dye_model, 'joint'), sub = [sub '_joint2']; end       % 2-channel and joint slopes never share a cache
     sub = [sub '_sigma'];                                                   % v3 masks: physical precision (sigma_S), despeckle, dark mask
+    sub = [sub '_yup'];                                                     % Sy = d eta/dy with y up (sign fixed 2026-10-25): old caches not reused
+    if cfg.warm_start, sub = [sub '_warm']; end                             % previous-frame warm start changes the slopes
+    if ~isequal(cfg.ref_frames, 1)                                          % median reference (frame 1 alone keeps the old name)
+        sub = sprintf('%s_ref%d-%d', sub, min(cfg.ref_frames), max(cfg.ref_frames));
+    end
+    if ~strcmp(cfg.drift_corr, 'none'), sub = [sub '_' cfg.drift_corr]; end  % per-frame brightness correction
+    if strcmpi(cfg.colour_channels, 'RGB'), sub = [sub '_rgb']; end         % blue in the colour solve
+    if strcmpi(cfg.colour_channels, 'hybrid'), sub = [sub '_hyb']; end      % blue only where R, G fails / folds
+    if ~isempty(cfg.bias_frames), sub = [sub '_flat']; end                  % flat-water bias subtracted
     if cfg.dye_mask, sub = [sub '_dye']; end
     % Cached slopes are ROI-cropped, so a non-default ROI gets its own folder
     % (the default central-60% cache keeps its old name)
@@ -99,15 +135,28 @@ if cfg.use_parfor
             axes(fp);  fp.UserData = 0;                      %#ok<LAXES>  (frame counter)
             afterEach(dq, @(d) show_progress(fp, d, numel(todo), t0));
         end
-        fs_ = R.img_size;  bad_f = false(numel(todo), 1);  bad_m = cell(numel(todo), 1);  bad_id = cell(numel(todo), 1);
-        parfor i = 1:numel(todo)
-            try
-                [sx, ~] = cisg_cache_frame(todo(i), rb, st, ff, cd_, bn, dtt, fs_);
-                if ~isempty(dq), send(dq, struct('n', todo(i), 'Sx', sx(1:8:end, 1:8:end))); end
-            catch ME                                         % record the failure (identifier + message), judged below
-                bad_f(i) = true;  bad_m{i} = ME.message;  bad_id{i} = ME.identifier;
+        fs_ = R.img_size;
+        % contiguous blocks of frames, solved in order inside a block so each frame can start from the one before
+        % (warm start); only a block's first frame needs the lead-in.  2 blocks per worker for load balance.
+        nb = min(numel(todo), 2 * nw);  edges = round(linspace(0, numel(todo), nb + 1));
+        blocks = arrayfun(@(k) todo(edges(k) + 1:edges(k + 1)), 1:nb, 'UniformOutput', false);
+        warm0 = [];  if cfg.warm_start, warm0 = struct('prev', [], 'lead', cfg.warm_lead); end
+        bf = cell(nb, 1);  bm = cell(nb, 1);  bi = cell(nb, 1);
+        parfor k = 1:nb
+            fr = blocks{k};  wk = warm0;  f_ = false(numel(fr), 1);  m_ = cell(numel(fr), 1);  i_ = cell(numel(fr), 1);
+            for j = 1:numel(fr)
+                try
+                    [sx, sy] = cisg_cache_frame(fr(j), rb, st, ff, cd_, bn, dtt, fs_, wk);
+                    if ~isempty(wk), wk.prev = struct('n', fr(j), 'Sx', sx, 'Sy', sy); end
+                    if ~isempty(dq), send(dq, struct('n', fr(j), 'Sx', sx(1:8:end, 1:8:end))); end
+                catch ME                                     % record the failure (identifier + message), judged below
+                    f_(j) = true;  m_{j} = ME.message;  i_{j} = ME.identifier;
+                    if ~isempty(wk), wk.prev = []; end
+                end
             end
+            bf{k} = f_;  bm{k} = m_;  bi{k} = i_;
         end
+        bad_f = vertcat(bf{:});  bad_m = vertcat(bm{:});  bad_id = vertcat(bi{:});
         if live, close(fp); end
         % only 'cisg:badFrame' (empty / truncated file) is skippable; anything else is a bug: fail loudly
         other = bad_f & ~strcmp(bad_id, 'cisg:badFrame');
@@ -128,13 +177,15 @@ end
 %% ---------------- Single frame: just the figure, no video ----------------
 if isscalar(frames)
     n = frames;
-    [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size);
+    warm = [];  if cfg.warm_start, warm = struct('prev', [], 'lead', cfg.warm_lead); end
+    [Sx, Sy] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size, warm);
     obs = cisg_load_coreview(R.frame_file(n), R.img_size);
     if cfg.bin > 1, obs = uint8(imresize(obs, 1 / cfg.bin, 'box')); end
     fig = figure('Name', sprintf('CISG CoreView %d frame %d', cfg.coreview_num, n), ...
                  'Position', [50 50 cfg.fig_size]);
     opts = struct('bin', cfg.bin, 'lim_s', cfg.lim_s, 'lim_eta', cfg.lim_eta, ...
-                  'head', sprintf('CoreView %d, frame %d, t = %.2f s', cfg.coreview_num, n, (n - 1) * R.dt));
+                  'head', sprintf('CoreView %d, frame %d, %s', cfg.coreview_num, n, tstr(n)), ...
+                  'ts', ts, 't_now', R.t_wind(n), 'ts_xlim', cfg.series_xlim);
     info = cisg_plot_frame(fig, obs, double(Sx), double(Sy), setup_b, R.cal, opts);
     fprintf('frame %d: rms Sx %.3f Sy %.3f eta %.2f mm, masked %.1f%% (single frame: no video written)\n', ...
             n, info.rms_sx, info.rms_sy, info.rms_eta, info.masked);
@@ -146,15 +197,18 @@ fig = figure('Visible', matlab.lang.OnOffSwitchState(live), 'Position', [50 50 c
 vw = VideoWriter(cfg.out_path, 'MPEG-4');
 vw.FrameRate = cfg.out_fps;  vw.Quality = cfg.quality;
 open(vw);
-opts = struct('bin', cfg.bin, 'lim_s', cfg.lim_s, 'lim_eta', cfg.lim_eta);
+opts = struct('bin', cfg.bin, 'lim_s', cfg.lim_s, 'lim_eta', cfg.lim_eta, 'ts', ts, 't_now', [], 'ts_xlim', cfg.series_xlim, ...
+              'eta_hist', struct('t', [], 'v', []));       % CISG eta at (0, 0) of the frames so far, over the wave gauge
 have_good = false;
+warm = [];  if cfg.warm_start, warm = struct('prev', [], 'lead', cfg.warm_lead); end
 tic;
 for i = 1:numel(frames)
     n = frames(i);
     t1 = tic;
     blank = false;  missing = '';
     try
-        [Sx_n, Sy_n] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size);
+        [Sx_n, Sy_n] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size, warm);
+        if ~isempty(warm), warm.prev = struct('n', n, 'Sx', Sx_n, 'Sy', Sy_n); end
         obs_n = cisg_load_coreview(R.frame_file(n), R.img_size);
         if cfg.bin > 1, obs_n = uint8(imresize(obs_n, 1 / cfg.bin, 'box')); end
         Sx = Sx_n;  Sy = Sy_n;  obs = obs_n;  have_good = true;
@@ -175,14 +229,15 @@ for i = 1:numel(frames)
         end
     end
     if blank
-        opts.head = sprintf('CoreView %d, frame %d (t = %.2f s) - MISSING (%s)', cfg.coreview_num, n, (n - 1) * R.dt, reason);
+        opts.head = sprintf('CoreView %d, frame %d (%s) - MISSING (%s)', cfg.coreview_num, n, tstr(n), reason);
     else
-        opts.head = sprintf('CoreView %d, frame %d%s, t = %.2f s', cfg.coreview_num, n, missing, (n - 1) * R.dt);
+        opts.head = sprintf('CoreView %d, frame %d%s, %s', cfg.coreview_num, n, missing, tstr(n));
     end
-    opts.blank = blank;
+    opts.blank = blank;  opts.t_now = R.t_wind(n);
     info = cisg_plot_frame(fig, obs, double(Sx), double(Sy), setup_b, R.cal, opts);
-    if blank                                                 % big label on the raw panel
-        ax1 = subplot(2, 2, 1);
+    opts.eta_hist.t(end+1) = opts.t_now;  opts.eta_hist.v(end+1) = info.eta_centre_mm;   % NaN for a missing frame
+    if blank                                                % big label on the raw panel
+        ax1 = info.ax_raw;
         text(ax1, mean(xlim(ax1)), mean(ylim(ax1)), sprintf('frame %d missing', n), 'Color', 'w', 'FontSize', 28, ...
              'FontWeight', 'bold', 'HorizontalAlignment', 'center');
     else                                                     % hold the colour limits from the first good frame

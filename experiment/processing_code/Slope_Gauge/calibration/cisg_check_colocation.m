@@ -10,7 +10,7 @@
 % assumption, parity) is NOT tested here: it cannot be seen from corners.
 %
 % Writes calibration/cisg_colocation_check.png.
-clearvars -except run_num; clc;                    % run_num = 95 (default), 96 or 101: uses that run's plate cal and IR snapshot cal
+clearvars -except run_num P; clc;                  % run_num = 95 (default), 96 or 101: uses that run's plate cal and IR snapshot cal; P = cisg_pipeline.m settings
 if ~exist('run_num', 'var'), run_num = 95; end
 here = fileparts(mfilename('fullpath'));
 if isempty(here), here = pwd; end

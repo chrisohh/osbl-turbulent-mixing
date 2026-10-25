@@ -7,8 +7,11 @@ function [Sx, Sy, info] = cisg_calculate_slopes(ref_image, obs_image, setup)
 %   design - design parameters struct
 %
 % Outputs (info: colour-inversion info of the 'local' map, e.g. info.dye_c with setup.dye_model = 'joint'; [] otherwise):
-%   Sx - x-component of surface slope
-%   Sy - y-component of surface slope
+%   Sx - d eta / dx, x = image right (columns, downwind)
+%   Sy - d eta / dy, y = image UP (the tank frame of the plate calibration).  The colour shift is measured along
+%        rows (down), so Sy = -(row shift) x scale.  Before 2026-10-25 Sy had the opposite sign (d eta / d row):
+%        the curl of (Sx, Sy) was ~1 x its divergence and ~0.3 with Sy flipped (cisg_pipeline 5j); caches made
+%        before then are not reused (folder tag _yup, flat-bias key sy_up).
 
 % Extract color channels and convert to double
 info = [];
@@ -48,9 +51,14 @@ end
 if use_new && isfield(setup, 'colour_map') && strcmp(setup.colour_map, 'local')
     % Local colour -> position inversion (Jacobian of the reference frame); NaN where untrustworthy.
     % dpx: shift along columns, dpy: along rows (same sign as the linear path), in pixels
+    if isfield(setup, 'init_Sx') && ~isempty(setup.init_Sx)        % warm start: previous frame's slopes (ROI-sized) -> shift (px)
+        setup.init_dx = double(setup.init_Sx) * ((setup.n_water - setup.n_air) * setup.L_eff_cm) / (setup.pattern_scale * setup.cm_per_pixel_x);
+        setup.init_dy = -double(setup.init_Sy) * ((setup.n_water - setup.n_air) * setup.L_eff_cm) / (setup.pattern_scale * setup.cm_per_pixel_y);
+    end
     [dpx, dpy, info] = cisg_colour_displacement(ref_image, obs_image, setup);
-    Sx = dpx * (setup.pattern_scale * setup.cm_per_pixel_x) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
-    Sy = dpy * (setup.pattern_scale * setup.cm_per_pixel_y) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
+    % the ray bends uphill, so the pattern seen at x moves by +k grad(eta): columns run with +x, rows against +y
+    Sx =  dpx * (setup.pattern_scale * setup.cm_per_pixel_x) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
+    Sy = -dpy * (setup.pattern_scale * setup.cm_per_pixel_y) / ((setup.n_water - setup.n_air) * setup.L_eff_cm);
     k_sp = 4;  if isfield(setup, 'speckle_k'), k_sp = setup.speckle_k; end        % isolated-speckle filter (0 = off)
     info.n_speckle = 0;
     if k_sp > 0
@@ -88,9 +96,9 @@ end
 % Convert using ruler calibration: (cm/pixel) / (color/pixel) = cm/color
 scale_x = r * setup.cm_per_pixel_x / p_x(1);
 scale_y = r * setup.cm_per_pixel_y / p_y(1);
-% Physical displacement on pattern (cm)
+% Physical displacement on pattern (cm); the green ramp is fitted along rows (down), so negate it for y up
 delta_x = delta_R * scale_x;
-delta_y = delta_G * scale_y;
+delta_y = -delta_G * scale_y;
 
 if use_new
     % A ray is deviated by S (n_w - n_a)/n_w in the water, so the pattern is displaced by

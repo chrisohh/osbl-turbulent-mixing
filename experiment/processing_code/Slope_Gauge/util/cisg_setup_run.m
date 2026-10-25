@@ -8,7 +8,11 @@ function R = cisg_setup_run(cfg)
 %
 % cfg fields (defaults):
 %   coreview_num  95
-%   ref_frame     1          still-water reference = this frame of the run
+%   ref_frames    2:4:58     still-water reference = per-pixel MEDIAN of these frames of the run (flat water at the
+%                            start).  Not frame 1: on run 101 it is ~0.8 counts brighter in R, G, B than frames 2-200
+%                            (first-frame exposure), which reads as a uniform slope of ~0.01 (cisg_pipeline 5d); a
+%                            median also drops anything in one frame only (a speck, a drip).  A scalar = that frame
+%                            alone (ref_frame, the old field, is still accepted).
 %   roi_mode      'default'  'default' (central 60%), 'full' (whole image, dark / off-target pixels of the reference masked), 'auto' (from the reference, see cisg_auto_roi; auto_margin px inset),
 %                            'pick' (interactive) or a roi struct
 %   roi_file      ''         'pick': where the picked ROI is saved / reused
@@ -21,16 +25,18 @@ function R = cisg_setup_run(cfg)
 %   bin           2          bin factor the noise estimate (precision mask) is made for (cisg_slope_video passes cfg.bin)
 %   setup         struct     fields overriding the defaults below (colour_map, colour_sigma, ...)
 %
-% R fields: setup, cal, depth, ref_image, obs_folder, frame_file (@(n) path), dt, img_size
+% R fields: setup, cal, depth, ref_image, obs_folder, frame_file (@(n) path), dt, img_size,
+%   cam_delay_s (camera start after wind start, cisg_wind_delay; NaN = unknown), t_wind (@(n) s after wind start)
 
     here = fileparts(mfilename('fullpath'));
     sg = fileparts(here);
     addpath(fullfile(sg, 'calibration'), fullfile(fileparts(sg), 'IR Camera', 'calibration'));
 
-    def = struct('coreview_num', 95, 'ref_frame', 1, 'roi_mode', 'default', ...
+    def = struct('coreview_num', 95, 'ref_frames', 2:4:58, 'roi_mode', 'default', ...
                  'roi_file', '', 'roi_repick', false, 'auto_margin', 0, 'bin', 2, 'cal_path', '', 'dye_model', '', ...
                  'raw_root', 'D:\HLAB_2026\Core', 'fs', 50, 'setup', struct());
     if nargin < 1, cfg = struct(); end
+    if isfield(cfg, 'ref_frame') && ~isfield(cfg, 'ref_frames'), cfg.ref_frames = cfg.ref_frame; end
     for f = fieldnames(def).'
         if ~isfield(cfg, f{1}), cfg.(f{1}) = def.(f{1}); end
     end
@@ -41,7 +47,7 @@ function R = cisg_setup_run(cfg)
     R.dt = 1 / cfg.fs;
 
     setup = struct('water_depth', 48, 'use_apparent_depth', true, 'colour_map', 'local', ...
-                   'colour_norm', 'none', 'colour_sigma', 12, 'max_disp_px', 600, 'drift_corr', 'none', ...
+                   'colour_norm', 'none', 'colour_sigma', 12, 'max_disp_px', 600, 'drift_corr', 'none', 'colour_channels', 'RG', ...
                    'n_water', 1.333, 'n_air', 1.000, 'frame_rate', cfg.fs, 'dt', R.dt);
     for f = fieldnames(cfg.setup).'
         setup.(f{1}) = cfg.setup.(f{1});
@@ -58,7 +64,27 @@ function R = cisg_setup_run(cfg)
     cal = S.cal;
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal);
 
-    ref_image = cisg_load_coreview(R.frame_file(cfg.ref_frame), [3072 4100]);   % some runs (101) are all headerless
+    % still-water reference: per-pixel median of cfg.ref_frames (unreadable frames skipped)
+    sz0 = [3072 4100];                                                      % some runs (101) are all headerless
+    stack = zeros([sz0 3 numel(cfg.ref_frames)], 'uint8');  nref = 0;
+    for n = cfg.ref_frames
+        try
+            nref = nref + 1;  stack(:, :, :, nref) = cisg_load_coreview(R.frame_file(n), sz0);
+        catch ME
+            if ~strcmp(ME.identifier, 'cisg:badFrame'), rethrow(ME); end
+            nref = nref - 1;  fprintf('reference: frame %d unreadable, skipped\n', n);
+        end
+    end
+    if nref == 0, error('cisg_setup_run:ref', 'No readable reference frame in %s', mat2str(cfg.ref_frames)); end
+    if nref == 1
+        ref_image = stack(:, :, :, 1);
+    else
+        ref_image = zeros([sz0 3], 'uint8');
+        for c = 1:3, ref_image(:, :, c) = median(stack(:, :, c, 1:nref), 4); end
+    end
+    clear stack
+    fprintf('reference: median of %d frame(s) %s\n', nref, mat2str(cfg.ref_frames));
+    R.ref_frames = cfg.ref_frames;  R.n_ref = nref;
     [h, w, ~] = size(ref_image);
 
     depth = cisg_apparent_depth(ref_image, cal, struct('n_w', setup.n_water));
@@ -113,7 +139,14 @@ function R = cisg_setup_run(cfg)
     [setup.cm_per_pixel_x, setup.cm_per_pixel_y] = cisg_local_scale(cal, roi_centre);
 
     % camera noise of the smoothed colours (two early frames) -> physical precision mask (setup.max_slope_sigma, slope units)
-    setup.noise = cisg_noise_estimate(R.frame_file, cfg.bin, setup.colour_sigma / cfg.bin, [1 3], [h w]);
+    % frames 2, 4 (frame 1 is off in exposure).  The estimate is of a difference of two single frames, sqrt(2) sigma;
+    % against a median of n_ref frames the reference noise is ~sqrt(pi/2 / n_ref) sigma, so rescale to that
+    setup.noise = cisg_noise_estimate(R.frame_file, cfg.bin, setup.colour_sigma / cfg.bin, [2 4], [h w]);
+    fr = sqrt((1 + (pi / 2) / nref) / 2);
+    setup.noise.a = setup.noise.a * fr;  setup.noise.b = setup.noise.b * fr;  setup.noise.ref_factor = fr;
     setup.max_slope_sigma = 0.02;
     R.setup = setup;  R.cal = cal;  R.depth = depth;  R.ref_image = ref_image;  R.img_size = [h w];  R.channel = cc;
+    [R.cam_delay_s, src] = cisg_wind_delay(cfg.coreview_num);           % frame n at cam_delay_s + (n-1) dt after wind start
+    fprintf('wind clock: camera start %.3f s after wind start (%s)\n', R.cam_delay_s, src);
+    R.t_wind = @(n) R.cam_delay_s + (n - 1) * R.dt;
 end

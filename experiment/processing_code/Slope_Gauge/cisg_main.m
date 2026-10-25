@@ -166,6 +166,7 @@ out_root = cache_root;
 out_dir  = fullfile(out_root, sprintf('CISG_slopes_CoreView_%d', coreview_num));
 if strcmp(setup.dye_model, 'joint'), out_dir = [out_dir '_joint2']; end    % 2-channel and joint slopes never share a cache
 out_dir = [out_dir '_sigma'];                                       % v3 masks: physical precision (sigma_S), despeckle, dark mask
+out_dir = [out_dir '_yup'];                                         % Sy = d eta/dy with y up (sign fixed 2026-10-25, cisg_calculate_slopes)
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 save(fullfile(out_dir, 'metadata.mat'), 'setup', 'time', ...

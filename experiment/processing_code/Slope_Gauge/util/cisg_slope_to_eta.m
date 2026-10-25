@@ -10,7 +10,9 @@ function [eta_mm, info] = cisg_slope_to_eta(Sx, Sy, mm_per_px_x, mm_per_px_y, q)
 %
 % eta_mm        - elevation (mm) on the coarse grid [floor(rows/q) x floor(cols/q)], mean removed
 % info          - Sx_c, Sy_c (block-averaged slopes, NaN-filled), dx_mm, dy_mm (coarse spacing),
-%                 nan_fraction (of coarse cells that had no valid pixel)
+%                 nan_fraction (of coarse cells that had no valid pixel), valid_frac (per coarse cell:
+%                 fraction of pixels with both slopes valid).  eta_mm is defined everywhere (the gaps are
+%                 filled for the solve); blank the filled cells with eta_mm(info.valid_frac < 0.5) = NaN.
 %
 % Non-periodic Poisson solve with Neumann boundaries: the slope field is
 % mirror-extended (eta even, so the slope normal to a mirror is odd), then
@@ -49,7 +51,8 @@ function [eta_mm, info] = cisg_slope_to_eta(Sx, Sy, mm_per_px_x, mm_per_px_y, q)
     eta_mm = e(1:nr, 1:nc);
     eta_mm = eta_mm - mean(eta_mm(:));
 
-    info = struct('Sx_c', Sxc, 'Sy_c', Syc, 'dx_mm', dx, 'dy_mm', dr, 'nan_fraction', nan_frac);
+    vf = blk(isfinite(Sx) & isfinite(Sy));
+    info = struct('Sx_c', Sxc, 'Sy_c', Syc, 'dx_mm', dx, 'dy_mm', dr, 'nan_fraction', nan_frac, 'valid_frac', vf);
 end
 
 function A = relax_fill(A, bad)
