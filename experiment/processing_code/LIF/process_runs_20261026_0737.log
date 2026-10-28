@@ -1,0 +1,79 @@
+
+===== run 102  (07:37:18; still queued: 120) =====
+Water_Surf: 3247 complete frames (1..3247); writing 325 -> D:\HLAB_2026\Core\CoreView_102\CoreView_102_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_94\Water_Surf\CoreView_94_Water_Surf_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.1231 mm/px (uniform-scale RMS 0.42 px, max 1.27 px)
+  camera-plate ~1343 mm; offset 25.0 mm (apparent 18.8) -> 0.1248 mm/px (+1.40%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core94.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 9.97 cm above the board centre (x-std 0.20 cm) -> z = 0
+Lighting step at frame 251: bg re-lit from frames 276..321 (gain 0.538, 5-95% 0.024..0.607)
+[Warning: Run 102: surface -2.62 cm from the bg
+water level 1-4 s after the bg frames -> z = 0
+moved to the early-run surface.] 
+[> In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('surf_theta_video', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m', 165)" style="font-weight:bold">surf_theta_video</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m',165,0)">line 165</a>)
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('process_runs', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m', 16)" style="font-weight:bold">process_runs</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m',16,0)">line 16</a>)] 
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_wave_gauge_20261005_043030_avg0.02.mat
+[Warning:
+D:\HLAB_2026\Core\CoreView_102\CoreView_102_surf_theta.mp4
+is open elsewhere (player / preview?) -- writing
+D:\HLAB_2026\Core\CoreView_102\CoreView_102_surf_theta_20261026_0737.mp4
+instead.] 
+[> In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('lif_video_file', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\util\lif_video_file.m', 17)" style="font-weight:bold">lif_video_file</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\util\lif_video_file.m',17,0)">line 17</a>)
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('surf_theta_video', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m', 189)" style="font-weight:bold">surf_theta_video</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m',189,0)">line 189</a>)
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('process_runs', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m', 16)" style="font-weight:bold">process_runs</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m',16,0)">line 16</a>)] 
+z99(x) line window 1.0 cm (dye SNR [20.8 24.4 26.2] at frames [1941 2591 3241]; registry 1.0 cm)
+  25/325  frame 241  t = 14.90 s  z99 = -0.30 cm  --  0.18 fps  ETA 1681 s
+  50/325  frame 491  t = 19.90 s  z99 = -0.30 cm  --  0.14 fps  ETA 1902 s
+  75/325  frame 741  t = 24.90 s  z99 = -0.30 cm  --  0.15 fps  ETA 1676 s
+  100/325  frame 991  t = 29.90 s  z99 = -0.35 cm  --  0.15 fps  ETA 1511 s
+  125/325  frame 1241  t = 34.90 s  z99 = -0.37 cm  --  0.15 fps  ETA 1357 s
+  150/325  frame 1491  t = 39.90 s  z99 = -0.42 cm  --  0.15 fps  ETA 1168 s
+  175/325  frame 1741  t = 44.90 s  z99 = -3.12 cm  --  0.15 fps  ETA 987 s
+  200/325  frame 1991  t = 49.90 s  z99 = -5.37 cm  --  0.15 fps  ETA 820 s
+  225/325  frame 2241  t = 54.90 s  z99 = -7.11 cm  --  0.15 fps  ETA 653 s
+  250/325  frame 2491  t = 59.90 s  z99 = -8.94 cm  --  0.16 fps  ETA 476 s
+  275/325  frame 2741  t = 64.90 s  z99 = -10.61 cm  --  0.16 fps  ETA 309 s
+  300/325  frame 2991  t = 69.90 s  z99 = -12.63 cm  --  0.17 fps  ETA 151 s
+  325/325  frame 3241  t = 74.90 s  z99 = -15.58 cm  --  0.17 fps  ETA 0 s
+
+Wrote D:\HLAB_2026\Core\CoreView_102\CoreView_102_surf_theta_20261026_0737.mp4  (325 frames, 1936.1 s)
+Saved z99 time series to D:\HLAB_2026\Core\CoreView_102\CoreView_102_surf_theta_z99.mat
+
+===== run 120  (08:10:12; still queued: zeros(1,0)) =====
+Water_Surf: 3249 complete frames (1..3250); writing 325 -> D:\HLAB_2026\Core\CoreView_120\CoreView_120_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_122\Flare 12M125 CCL C1112A00\CoreView_122_Flare 12M125 CCL C1112A00_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.1244 mm/px (uniform-scale RMS 3.74 px, max 7.20 px)
+  camera-plate ~1357 mm; offset 0.0 mm (apparent 0.0) -> 0.1244 mm/px (+0.00%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core122.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 6.91 cm above the board centre (x-std 0.01 cm) -> z = 0
+Run 120: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.02.mat
+CT profile D:\HLAB_2026\CT\densityProfileData_20261009_0151.mat: pycnocline -12.7..-8.7 cm
+z99(x) line window 4.0 cm (dye SNR [0.1 18.6 5.7] at frames [1941 2591 3241]; registry 3.0 cm)
+  25/325  frame 241  t = 14.80 s  z99 = -0.30 cm  --  0.10 fps  ETA 2991 s
+  50/325  frame 491  t = 19.80 s  z99 = -0.30 cm  --  0.09 fps  ETA 2933 s
+  75/325  frame 741  t = 24.80 s  z99 = -0.30 cm  --  0.09 fps  ETA 2726 s
+  100/325  frame 991  t = 29.80 s  z99 = -0.32 cm  --  0.09 fps  ETA 2477 s
+  125/325  frame 1241  t = 34.80 s  z99 = -0.32 cm  --  0.09 fps  ETA 2218 s
+  150/325  frame 1491  t = 39.80 s  z99 = -0.32 cm  --  0.09 fps  ETA 1948 s
+  175/325  frame 1741  t = 44.80 s  z99 = -0.35 cm  --  0.09 fps  ETA 1679 s
+  200/325  frame 1991  t = 49.80 s  z99 = -0.47 cm  --  0.09 fps  ETA 1405 s
+  225/325  frame 2241  t = 54.80 s  z99 = -1.22 cm  --  0.09 fps  ETA 1127 s
+  250/325  frame 2491  t = 59.80 s  z99 = -5.50 cm  --  0.09 fps  ETA 850 s
+  275/325  frame 2741  t = 64.80 s  z99 = -8.63 cm  --  0.09 fps  ETA 569 s
+  300/325  frame 2991  t = 69.80 s  z99 = -11.74 cm  --  0.09 fps  ETA 283 s
+  325/325  frame 3241  t = 74.80 s  z99 = -12.02 cm  --  0.09 fps  ETA 0 s
+
+Wrote D:\HLAB_2026\Core\CoreView_120\CoreView_120_surf_theta.mp4  (325 frames, 3698.0 s)
+Saved z99 time series to D:\HLAB_2026\Core\CoreView_120\CoreView_120_surf_theta_z99.mat
+
+===== comparison (09:12:24) =====
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_113939_avg0.1.mat
+run 95                       325 frames, floor -0.50 cm, resolved from t = 40.1 s, final z99_all = -22.07 cm
+Run 118: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.1.mat
+run 118 strat                325 frames, floor -0.30 cm, resolved from t = 40.2 s, final z99_all = -11.04 cm
+   CT D:\HLAB_2026\CT\densityProfileData_20261008_0033.mat: 19 points, pycnocline -11.7..-8.7 cm
+Saved D:\HLAB_2026\Core\compare_depth_best.png

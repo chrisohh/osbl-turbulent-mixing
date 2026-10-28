@@ -25,6 +25,10 @@ function out = run_registry(arg, varargin)
 %   wind_standin                 another run's wind record shown (labelled)
 %                                when this run has none
 %   wave_file, wave_ref_file     wave gauge during the run / dye-free repeat
+%   wave_standin                 another run's wave-gauge record shown (labelled)
+%                                when this run has none (unstrat 88-96:
+%                                wavegauge_20261005_040137 = core 101; strat 116-121:
+%                                wave_gauge_20261008_231731_r1)
 %   ct_pre                       CT profile taken BEFORE the run (strat)
 %   line_bin_cm                  z99(x) line window for the side view
 %   onset_s                      picked onset time (s since wind start)
@@ -69,6 +73,7 @@ function out = run_registry(arg, varargin)
     R.standin_path = wind_path(R.wind_standin);
     R.wave_path    = wind_path(R.wave_file);
     R.wave_ref_path = wind_path(R.wave_ref_file);
+    R.wave_standin_path = wind_path(R.wave_standin);
     R.ct_pre_path  = '';
     if ~isempty(R.ct_pre)
         R.ct_pre_path = fullfile('D:\HLAB_2026\CT', [R.ct_pre '.mat']);

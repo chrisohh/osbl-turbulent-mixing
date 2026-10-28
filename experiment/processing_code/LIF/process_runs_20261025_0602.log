@@ -1,0 +1,21 @@
+
+===== run 118  (06:02:04; still queued: zeros(1,0)) =====
+Water_Surf: 3250 complete frames (1..3250); writing 325 -> D:\HLAB_2026\Core\CoreView_118\CoreView_118_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_122\Flare 12M125 CCL C1112A00\CoreView_122_Flare 12M125 CCL C1112A00_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.1244 mm/px (uniform-scale RMS 3.74 px, max 7.20 px)
+  camera-plate ~1357 mm; offset 0.0 mm (apparent 0.0) -> 0.1244 mm/px (+0.00%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core122.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 6.93 cm above the board centre (x-std 0.02 cm) -> z = 0
+Run 118: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.02.mat
+run 118 FAILED: Cannot create file D:\HLAB_2026\Core\CoreView_118\CoreView_118_surf_theta.mp4. Permission Denied.
+
+===== comparison (06:02:21) =====
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_113939_avg0.1.mat
+run 95                       325 frames, floor -1.02 cm, resolved from t = 40.1 s, final z99_all = -19.45 cm
+Run 118: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.1.mat
+run 118 strat                325 frames, floor -0.25 cm, resolved from t = 40.0 s, final z99_all = -11.12 cm
+   CT D:\HLAB_2026\CT\densityProfileData_20261008_0033.mat: 19 points, pycnocline -11.7..-8.7 cm
+Saved D:\HLAB_2026\Core\compare_depth_best.png

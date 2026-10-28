@@ -22,7 +22,7 @@ function bg = lif_load_bg(fname, frames, downsample)
     bg = 0;
     for n = frames
         I  = lif_load_raw(fname(n));
-        bg = bg + I(1:downsample:end, 1:downsample:end);
+        bg = bg + double(I(1:downsample:end, 1:downsample:end));   % double: uint16 sums round and saturate
     end
     bg = bg / numel(frames);
 end

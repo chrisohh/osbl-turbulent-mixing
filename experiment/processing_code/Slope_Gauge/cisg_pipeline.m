@@ -631,6 +631,25 @@ cfg_override = P.video;  cfg_override.coreview_num = P.run_num;
 cisg_slope_video;                                 % clears the workspace except cfg_override
 diary off;
 
+%% 6b. Re-render the video from the slope cache (no solving: run section 0 first)
+% Same settings as section 6, so the same cache folder.  Colour limits: [] = 99.5th percentile of |S| and
+% |eta| over 30 frames spread through the record (the old default, 3 x rms of the first frame, saturated
+% once the waves grew); or set them, e.g. 0.4 and 8 (mm).  A missing cache frame is solved serially.
+P.video.frames    = 1000:3246;
+P.video.out_fps   = 50;
+P.video.lim_s     = [];
+P.video.lim_eta   = [];
+P.video.lim_pct   = 99.5;
+P.video.use_parfor = false;                       % no pool: everything is cached
+P.video.render_only = true;                       % never solve: an uncached frame becomes a blank video frame
+delete(gcp('nocreate'));                          % the section-6 workers can hold tens of GB: free the RAM for the render
+P.video.out_path  = fullfile(P.video.out_root, sprintf('CISG_slopes_CoreView_%d_frames_%d-%d_lim.mp4', ...
+                             P.run_num, P.video.frames(1), P.video.frames(end)));
+fprintf('\n--- 6b. re-render from cache, %d frames ---\n', numel(P.video.frames));
+cfg_override = P.video;  cfg_override.coreview_num = P.run_num;
+cisg_slope_video;
+diary off;
+
 %% 7. OPTIONAL, skipped by default: outlier pass over the cache (masks stored in the cache files, slopes untouched)
 % Flagged only 0.3% of run 101 frame 2000 (section 5c), so it is not part of the normal run.
 % Section 6 cleared the workspace: run section 0 first.  This finds the newest cache folder of the run.

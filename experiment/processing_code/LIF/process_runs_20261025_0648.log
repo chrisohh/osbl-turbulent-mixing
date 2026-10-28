@@ -1,0 +1,24 @@
+
+===== run 120  (06:48:42; still queued: zeros(1,0)) =====
+Water_Surf: 3249 complete frames (1..3250); writing 325 -> D:\HLAB_2026\Core\CoreView_120\CoreView_120_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_122\Flare 12M125 CCL C1112A00\CoreView_122_Flare 12M125 CCL C1112A00_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.1244 mm/px (uniform-scale RMS 3.74 px, max 7.20 px)
+  camera-plate ~1357 mm; offset 0.0 mm (apparent 0.0) -> 0.1244 mm/px (+0.00%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core122.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 6.91 cm above the board centre (x-std 0.01 cm) -> z = 0
+Run 120: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.02.mat
+{Operation terminated by user during <a href="matlab:matlab.internal.language.introspective.errorDocCallback('mean')" style="font-weight:bold">mean</a>
+
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('lif_z99', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\util\lif_z99.m', 403)" style="font-weight:bold">lif_z99</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\util\lif_z99.m',403,0)">line 403</a>)
+        s = depth_stats(zeta, mean(TH(:, cols), 2, 'omitnan'), ...
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('surf_theta_video', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m', 167)" style="font-weight:bold">surf_theta_video</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m',167,0)">line 167</a>)
+        lif_z99(I, z_cm, z_surf_all(i,:), z_front_all(i,:), mmpp*downsample, zo);
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('process_runs', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m', 16)" style="font-weight:bold">process_runs</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m',16,0)">line 16</a>)
+        surf_theta_video;
+} 
+cd('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF'); run_queue = [120]; process_runs

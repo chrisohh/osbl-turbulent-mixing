@@ -1,0 +1,73 @@
+
+===== run 92  (20:01:57; still queued: [89 95]) =====
+Water_Surf: 3249 complete frames (1..3249); writing 325 -> D:\HLAB_2026\Core\CoreView_92\CoreView_92_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_93\Water_Surf\CoreView_93_Water_Surf_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.0775 mm/px (uniform-scale RMS 0.83 px, max 1.71 px)
+  camera-plate ~846 mm; offset 25.0 mm (apparent 18.8) -> 0.0793 mm/px (+2.22%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core93.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 7.02 cm above the board centre (x-std 0.04 cm) -> z = 0
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_081422_avg0.02.mat
+[Warning: Exported image displays axes toolbar.
+To remove axes toolbar from image, export again.] 
+  25/325  frame 241  t = 14.83 s  z99 = -0.21 cm  --  0.17 fps  ETA 1727 s
+  50/325  frame 491  t = 19.83 s  z99 = -0.19 cm  --  0.17 fps  ETA 1580 s
+  75/325  frame 741  t = 24.83 s  z99 = -0.19 cm  --  0.15 fps  ETA 1695 s
+  100/325  frame 991  t = 29.83 s  z99 = -0.19 cm  --  0.15 fps  ETA 1525 s
+  125/325  frame 1241  t = 34.83 s  z99 = -2.14 cm  --  0.15 fps  ETA 1352 s
+  150/325  frame 1491  t = 39.83 s  z99 = -1.71 cm  --  0.15 fps  ETA 1179 s
+  175/325  frame 1741  t = 44.83 s  z99 = -5.10 cm  --  0.15 fps  ETA 1012 s
+  200/325  frame 1991  t = 49.83 s  z99 = -6.45 cm  --  0.15 fps  ETA 844 s
+  225/325  frame 2241  t = 54.83 s  z99 = -7.16 cm  --  0.15 fps  ETA 675 s
+  250/325  frame 2491  t = 59.83 s  z99 = -7.91 cm  --  0.15 fps  ETA 507 s
+  275/325  frame 2741  t = 64.83 s  z99 = -10.29 cm  --  0.15 fps  ETA 338 s
+  300/325  frame 2991  t = 69.83 s  z99 = -11.22 cm  --  0.15 fps  ETA 169 s
+  325/325  frame 3241  t = 74.83 s  z99 = -13.20 cm  --  0.15 fps  ETA 0 s
+
+Wrote D:\HLAB_2026\Core\CoreView_92\CoreView_92_surf_theta.mp4  (325 frames, 2206.6 s)
+Saved z99 time series to D:\HLAB_2026\Core\CoreView_92\CoreView_92_surf_theta_z99.mat
+
+===== run 89  (20:38:54; still queued: 95) =====
+Flare 12M125 MCL C0100800: 3250 complete frames (1..3250); writing 325 -> D:\HLAB_2026\Core\CoreView_89\CoreView_89_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_93\Water_Surf\CoreView_93_Water_Surf_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.0775 mm/px (uniform-scale RMS 0.83 px, max 1.71 px)
+  camera-plate ~846 mm; offset 25.0 mm (apparent 18.8) -> 0.0793 mm/px (+2.22%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Flare 12M125 MCL C0100800_Core93.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 8.17 cm above the board centre (x-std 0.04 cm) -> z = 0
+run 89 FAILED: No U, U_ref or eta in the file.
+
+===== run 95  (20:39:00; still queued: zeros(1,0)) =====
+Water_Surf: 3247 complete frames (1..3248); writing 325 -> D:\HLAB_2026\Core\CoreView_95\CoreView_95_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_94\Water_Surf\CoreView_94_Water_Surf_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.1231 mm/px (uniform-scale RMS 0.42 px, max 1.27 px)
+  camera-plate ~1343 mm; offset 25.0 mm (apparent 18.8) -> 0.1248 mm/px (+1.40%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core94.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 6.98 cm above the board centre (x-std 0.01 cm) -> z = 0
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_113939_avg0.02.mat
+  25/325  frame 241  t = 14.87 s  z99 = -0.65 cm  --  0.16 fps  ETA 1832 s
+  50/325  frame 491  t = 19.87 s  z99 = -1.62 cm  --  0.17 fps  ETA 1646 s
+  75/325  frame 741  t = 24.87 s  z99 = -0.95 cm  --  0.17 fps  ETA 1477 s
+  100/325  frame 991  t = 29.87 s  z99 = -0.95 cm  --  0.17 fps  ETA 1322 s
+  125/325  frame 1241  t = 34.87 s  z99 = -1.05 cm  --  0.17 fps  ETA 1171 s
+  150/325  frame 1491  t = 39.87 s  z99 = -2.07 cm  --  0.17 fps  ETA 1022 s
+  175/325  frame 1741  t = 44.87 s  z99 = -4.82 cm  --  0.17 fps  ETA 878 s
+  200/325  frame 1991  t = 49.87 s  z99 = -6.19 cm  --  0.17 fps  ETA 733 s
+  225/325  frame 2241  t = 54.87 s  z99 = -7.74 cm  --  0.17 fps  ETA 587 s
+  250/325  frame 2491  t = 59.87 s  z99 = -9.74 cm  --  0.17 fps  ETA 441 s
+  275/325  frame 2741  t = 64.87 s  z99 = -11.83 cm  --  0.17 fps  ETA 294 s
+  300/325  frame 2991  t = 69.87 s  z99 = -16.05 cm  --  0.17 fps  ETA 147 s
+  325/325  frame 3241  t = 74.87 s  z99 = NaN cm  --  0.17 fps  ETA 0 s
+
+Wrote D:\HLAB_2026\Core\CoreView_95\CoreView_95_surf_theta.mp4  (325 frames, 1921.8 s)
+Saved z99 time series to D:\HLAB_2026\Core\CoreView_95\CoreView_95_surf_theta_z99.mat
+
+===== comparison (21:11:10) =====
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_113939_avg0.1.mat
+run 95                       325 frames, floor -1.02 cm, resolved from t = 40.1 s, final z99_all = -19.45 cm
+Run 118: no wind record -- camera start assumed 10.00 s after wind start.
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20261009_034905_avg0.1.mat
+run 118 strat                325 frames, floor -0.25 cm, resolved from t = 40.0 s, final z99_all = -11.12 cm
+   CT D:\HLAB_2026\CT\densityProfileData_20261008_0033.mat: 19 points, pycnocline -11.7..-8.7 cm
+Saved D:\HLAB_2026\Core\compare_depth_best.png

@@ -21,6 +21,19 @@ function [mmpp, c0, info] = lif_trans_scale_cached(fplate, sc, cache_file)
         return
     end
 
+    if iscell(fplate)                       % several plate frames: first one that works
+        for k = 1:numel(fplate)
+            if ~isfile(fplate{k}), continue; end
+            try
+                lif_trans_scale(fplate{k}, setfield(sc, 'verbose', false)); %#ok<SFLD>
+                fplate = fplate{k};  break
+            catch ME
+                fprintf('  %s: %s -- trying the next plate frame\n', fplate{k}, ME.message);
+            end
+        end
+        if iscell(fplate), fplate = fplate{1}; end   % none worked: let the call below report it
+    end
+
     if isfile(fplate)
         [mmpp, c0, info] = lif_trans_scale(fplate, sc);
         if ~isfolder(fileparts(cache_file)), mkdir(fileparts(cache_file)); end

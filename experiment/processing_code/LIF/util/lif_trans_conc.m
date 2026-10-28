@@ -80,6 +80,10 @@ function R = lif_trans_conc(I, z_cm, z_surf, dx_mm, opts)
 %   only the reference can tell them apart),
 %   min_peak 8 (counts: the threshold that mask uses; without ref it is
 %   applied to the frame's own brightest pixel instead),
+%   valid [] (logical, same size as I: pixels inside the camera footprint.
+%   A frame flattened onto the sheet plane (lif_trans_rectify) is zero
+%   outside it -- those rows are kept out of the noise floor and add
+%   nothing to the integral, rather than -floor),
 %   int_depth_cm 5 (the 99% integral stops here below the surface;
 %   [] = the whole frame, as in the paper),
 %   normalize 'ref' (needs opts.ref; 'column' | 'peak' | 'none'), bin_cm 1,
@@ -112,7 +116,7 @@ function R = lif_trans_conc(I, z_cm, z_surf, dx_mm, opts)
                  'min_peak', 8, 'ref', [], 'int_depth_cm', 5, 'normalize', 'ref', ...
                  'bin_cm', 1, 'min_bin_frac', 0.5, 'dark', [], ...
                  'pen_frac', 0.02, 'pen_min_counts', 2, 'pen_smooth_cm', 0.5, ...
-                 'clip_above', true);
+                 'clip_above', true, 'valid', []);
     if nargin < 5, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -156,8 +160,11 @@ function R = lif_trans_conc(I, z_cm, z_surf, dx_mm, opts)
         if nnz(deep) < opts.deep_min_rows
             continue                                % not enough clear water to trust
         end
+        if ~isempty(opts.valid), deep = deep & opts.valid(:, j); end
+        if nnz(deep) < opts.deep_min_rows, continue; end
         floor_col(j) = median(c(deep));
         c = c - floor_col(j);
+        if ~isempty(opts.valid), c(~opts.valid(:, j)) = 0; end
 
         wet = z <= z_surf(j) - opts.surf_gap_cm;
         if ~any(wet), continue; end
@@ -206,6 +213,7 @@ function R = lif_trans_conc(I, z_cm, z_surf, dx_mm, opts)
         end
 
         C_img(wet, j) = cn(wet);
+        if ~isempty(opts.valid), C_img(~opts.valid(:, j), j) = NaN; end
 
         % Dye penetration: deepest row still at pen_frac of the column peak.
         % The absolute floor matters as much as the fraction -- without it a

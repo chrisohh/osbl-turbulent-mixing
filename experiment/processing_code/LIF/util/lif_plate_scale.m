@@ -28,10 +28,33 @@ function [mmpp, c0, info] = lif_plate_scale(fplate, opts)
     addpath(fullfile(here, '..', '..', 'IR Camera', 'calibration'));   % calib_target_params
 
     def = struct('plate_scale', 1, 'square_mm', [], 'offset_mm', 0, ...
-                 'n_medium', 1.33, 'lens_f_mm', 35, 'pixel_um', 5.5, 'verbose', true);
+                 'n_medium', 1.33, 'lens_f_mm', 35, 'pixel_um', 5.5, 'verbose', true, ...
+                 'max_rms', 5);   % px: plate 122 fits at 3.7 px in every frame (slight tilt,
+                                  % <0.5% scale error); the angled camera misses by ~50 px
     if nargin < 2, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
+    end
+
+    % Several plate frames: use the first that works -- board found and a
+    % uniform-scale fit within opts.max_rms px.  A bad first frame (board
+    % not detected, motion, partial view) moves on to the next.
+    if iscell(fplate)
+        for k = 1:numel(fplate)
+            if ~isfile(fplate{k}), continue; end
+            try
+                [mmpp, c0, info] = lif_plate_scale(fplate{k}, opts);
+                if info.rms_px <= opts.max_rms
+                    info.file = fplate{k};
+                    return
+                end
+                fprintf('  %s: uniform-scale RMS %.2f px > %g px -- trying the next plate frame\n', ...
+                        fplate{k}, info.rms_px, opts.max_rms);
+            catch ME
+                fprintf('  %s: %s -- trying the next plate frame\n', fplate{k}, ME.message);
+            end
+        end
+        error('lif_plate_scale:none', 'No usable plate frame among the %d given.', numel(fplate));
     end
 
     % Detect corners
@@ -49,9 +72,18 @@ function [mmpp, c0, info] = lif_plate_scale(fplate, opts)
         if isequal(sort(boardSize), sort([b.n_rows b.n_cols])), board = b; end
     end
     if isempty(board)
-        error('lif_plate_scale:board', ...
-              'Detected %dx%d squares: matches neither the fine (11x8) nor coarse (11x10) board.', ...
-              boardSize(1), boardSize(2));
+        % Partial board (part out of frame / covered, e.g. CoreView 122:
+        % 6x11 of the 10x11).  With the square size given, any detected
+        % patch of the board still gives the uniform scale.
+        if isempty(opts.square_mm)
+            error('lif_plate_scale:board', ...
+                  ['Detected %dx%d squares: matches neither the fine (11x8) nor coarse (11x10) ' ...
+                   'board -- give opts.square_mm to use a partial board.'], boardSize(1), boardSize(2));
+        end
+        warning('lif_plate_scale:partial', ...
+                'Detected %dx%d squares (partial board); using square_mm = %g.', ...
+                boardSize(1), boardSize(2), opts.square_mm);
+        board = struct('name', 'partial', 'square_mm', opts.square_mm);
     end
     square_mm = opts.square_mm;
     if isempty(square_mm), square_mm = board.square_mm * opts.plate_scale; end

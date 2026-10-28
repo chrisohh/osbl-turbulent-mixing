@@ -24,7 +24,8 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
     z99_line = z_surf(jc) + z99_x;
     % While the frame z99 is shallower than the side-view floor the dye is
     % still a surface layer and z99(x) is noise: draw no line (opts
-    % z99_floor_cm; CoreView 95: -2.3 cm, resolved from t ~ 42 s)
+    % z99_floor_cm: per frame from lif_z99_gate -- Inf once resolved, NaN
+    % while the run's floor is not known yet -- or a fixed number)
     fl = h.opts.z99_floor_cm;
     unresolved = ~isempty(fl) && ~(z99 < fl);
     if unresolved, z99_line(:) = NaN; end
@@ -34,22 +35,28 @@ function lif_surf_update(h, I, theta_img, x_cm, z_front, z_surf, z99_x, jc, zeta
     end
 
     if ~isempty(h.prP)
+        % the surface band is blank in the drawn profile (unknown there, not
+        % zero; the z99 integral still counts it as zero)
+        if nargin >= 14 && ~isempty(st) && isfield(st, 'theta_bar_disp'), theta_bar = st.theta_bar_disp; end
         set(h.prP, 'XData', theta_bar, 'YData', zeta);
         if ~isempty(h.z9P)
             if unresolved
                 set(h.z9P, 'YData', [NaN NaN]);
                 set(h.bandP, 'YData', [NaN NaN NaN NaN]);
-                h.ttP.String = sprintf('$z_{99}$ unresolved (above %.1f cm)', fl);
+                if isnan(fl), h.ttP.String = {'$z_{99}$ unresolved:', 'dye at the surface'};
+                else,         h.ttP.String = {'$z_{99}$ unresolved:', sprintf('dye in top %.1f cm', -fl)}; end
             else
                 set(h.z9P, 'YData', [z99 z99]);
-                q = prctile(z99_x, [5 95]);
+                if isempty(h.opts.z99_band), q = [NaN NaN]; else, q = prctile(z99_x, h.opts.z99_band); end
                 set(h.bandP, 'YData', q([1 1 2 2]));
                 h.ttP.String = sprintf('$z_{99} = %.2f$ cm', z99);
             end
         end
     end
     h.tt.String  = ttl;
-    if nargin >= 13 && ~isempty(h.hwLine), h.hwLine.Value = t_frame; end
+    if nargin >= 13
+        for L = h.hwLine(:).', L.Value = t_frame; end   % wind and wave panels
+    end
 
     % Grey layers from lif_z99's stats: uniform surface band (band_cm under
     % the local surface) and the unlit columns

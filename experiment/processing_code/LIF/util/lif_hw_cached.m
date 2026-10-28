@@ -13,8 +13,15 @@ function [camDelay, hw] = lif_hw_cached(hw_file, avg_s, cache_file)
 
     if isfile(hw_file)
         H = load(hw_file);
-        if isfield(H, 'camStartElapsed') && ~isnan(H.camStartElapsed)
+        if isfield(H, 'frameT') && ~isempty(H.frameT)
+            % Wave-gauge runs (run_wavegauge_fan_calibration.m): the camera
+            % trigger was recorded, so frame 1 is at the first recorded
+            % trigger (wind clock) -- better than the software start time
+            camDelay = H.frameT(1);
+        elseif isfield(H, 'camStartElapsed') && ~isnan(H.camStartElapsed)
             camDelay = H.camStartElapsed - H.fanStartElapsed;
+        elseif isfield(H, 'camOnT') && ~isempty(H.camOnT)
+            camDelay = H.camOnT(1);
         else
             camDelay = H.runConfig.DELAY_BEFORE_TRIG;
             warning('No camStartElapsed in %s -- using DELAY_BEFORE_TRIG = %g s.', hw_file, camDelay);

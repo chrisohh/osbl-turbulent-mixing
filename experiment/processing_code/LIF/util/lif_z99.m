@@ -43,12 +43,30 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
 %   ratio -- any camera offset biases I/I_bg, most in the dark lower image)
 %   bg_shift true (with bg: move each bg column so its surface sits on this
 %   frame's -- the flat bg otherwise puts air under wave crests),
+%   bg_mode 'extend' (how: 'extend' = from the bottom of the bg's own dark
+%   surface line up to this frame's surface, the reference is the bg's
+%   water level just below that line (median over bg_ref_cm 0.5); the line
+%   bottom is the deepest row within bg_line_max_cm 1 of the bg surface
+%   darker than bg_line_frac 0.85 x the water below, plus bg_line_pad_cm
+%   0.15.  'shift' = move the
+%   bg column up by the surface difference, tapered to 0 over bg_taper_cm
+%   -- under a 1.5 cm crest that stretched the bg's dark line over the
+%   whole crest: white pockets),
 %   bg_search_cm 1 (bg surface search, +/- around this frame's surface),
 %   surf_median_cm 0.6 (running median of the bg surface along x)
 %   lit_frac 0.5 (columns whose bg water is darker than this fraction of the
 %   frame median are unlit: blank, out of z99)
 %   trough_cm 20 (window for the trough envelope; the band above the local
 %   trough level is blank and out of the integrals -- look-through mixing)
+%   band_fill 'none' (display only -- theta_img / T_img in that band, where
+%   the look-through reads bright and showed as white pockets under the
+%   crests: 'none' = as measured; 'black' = paint it like the dark surface
+%   line around it; 'below' = the theta of the mixed layer under the dark
+%   line (median over band_fill_cm 0.5), from the surface down to where
+%   theta last exceeds dark_ratio 1.3 x the layer 1-3 cm below (searched
+%   down to dark_max_cm 1.5 under the trough level),
+%   median-smoothed over band_smooth_cm 2 along x; 'black' covers the same
+%   rows)
 %   drift_ref 'auto' ('auto' = 'clear' while >= clear_min_cm (6) of clear
 %   water remains below the front, else 'air'; 'air' = backlit air above the water, never dyed;
 %   'clear' = clear water below the dye front), air_window_cm [2 6],
@@ -69,7 +87,9 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
 %   z99       - frame-wide z99 (cm): opts.z99_all 'median' (default) = median
 %               of z99_x; 'profile' = from the all-x averaged theta (paper)
 %   stats     - struct: z90 (90% depth), zrms (RMS dye depth, -sqrt(<z^2>)),
-%               z90_x, zrms_x (per bin), peak (max of theta_bar).  All depths
+%               z90_x, zrms_x (per bin), peak (max of theta_bar), theta_bar_disp
+%               (theta_bar with the surface band blank rather than zero: for
+%               display; z99 integrates the band as zero).  All depths
 %               NaN while peak < opts.peak_min (0.03): too little dye to measure
 %   zeta      - [nz x 1] depth grid (cm, 0 = surface, negative down)
 %   theta_bar - [nz x 1] horizontally averaged theta on zeta
@@ -82,9 +102,9 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
     def = struct('frac', 0.99, 'smooth_mm', 1.5, 'surf_gap_cm', 0.4, ...
                  'fit_order', 2, 'fit_margin_cm', 0.5, 'bg', [], 'bg_normalize', true, 'bin_cm', 1, 'step_cm', 0.25, 'xmed', 3, 'filter', 'gauss', 'surf_method', 'edge', 'dark', [], ...
                  'bg_shift', true, 'bg_search_cm', 1, 'bg_window_cm', [-1 1], 'bg_taper_cm', 2, 'surf_median_cm', 0.6, ...
-                 'snr_min', 4, 'tail_cm', 1, 'tail_snr', 2, 'tail_rel', 0.02, 'z99_all', 'median', 'peak_min', 0.03, ...
+                 'snr_min', 4, 'tail_cm', 1, 'tail_snr', 2, 'tail_rel', 0.02, 'z99_all', 'profile', 'peak_min', 0.03, ...
                  'lit_frac', 0.5, 'trough_cm', 20, 'band_max_cm', 3, 'drift_ref', 'auto', 'clear_min_cm', 6, 'air_delta', 0, 'delta_tol', 0.01, ...
-                 'air_window_cm', [2 6], 'air_above_cm', 1, 'bottom_cm', 2);
+                 'air_window_cm', [2 6], 'air_above_cm', 1, 'bottom_cm', 2, 'bottom_edge_cm', 1.5, 'bg_mode', 'extend', 'bg_line_max_cm', 1, 'bg_line_frac', 0.85, 'bg_ref_cm', 0.5, 'bg_line_pad_cm', 0.15, 'band_fill', 'none', 'band_fill_cm', 0.5, 'dark_ratio', 1.3, 'dark_max_cm', 1.5, 'band_smooth_cm', 2);
     if nargin < 6, opts = struct(); end
     for f = fieldnames(def).'
         if ~isfield(opts, f{1}), opts.(f{1}) = def.(f{1}); end
@@ -113,7 +133,7 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
     % so its surface sits on this frame's.  The shift is a few mm, so the
     % lighting gradient it also moves is negligible (and normalised below).
     z = z_cm(:);
-    bg_shift = zeros(1, nx);
+    bg_shift = zeros(1, nx);  zb = nan(1, nx);
     if ~isempty(opts.bg) && opts.bg_shift
         % The bg surface is static (frame 1, flat, z ~ 0 in the frame-1
         % datum), so it is searched in a FIXED window, not around this
@@ -134,7 +154,7 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
 
     dz   = abs(z_cm(2) - z_cm(1));
     zeta = (0 : -dz : (min(z_cm) - max(z_surf))).';
-    TH   = nan(numel(zeta), nx);
+    TH   = nan(numel(zeta), nx);  THd = TH;
     theta_img = nan(size(I));
     T_img     = nan(size(I));
 
@@ -180,7 +200,25 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
         else
             lnC = lnB(:, j);
             Bj  = Bs(:, j);                            % filtered, as the theta panel
-            if bg_shift(j) ~= 0                        % bg surface onto this frame's
+            if strcmp(opts.bg_mode, 'extend') && ~isnan(zb(j))
+                % Water now where the bg has its own dark surface line or
+                % air (under crests): the reference there is the bg's water
+                % level just below that line.  Shifting the bg column up
+                % instead (bg_mode 'shift', tapered over bg_taper_cm)
+                % stretched the bg's dark line over the whole space under a
+                % crest -> I_bg ~ 120 against I ~ 480, theta ~ -1.4: white
+                % pockets (CoreView 118, frame 2881, x = 0).
+                wl  = z <= zb(j) - opts.bg_line_max_cm & z > zb(j) - opts.bg_line_max_cm - 0.8;
+                Wl  = median(Bj(wl));
+                dk  = find(z <= zb(j) & z > zb(j) - opts.bg_line_max_cm & Bj < opts.bg_line_frac * Wl);
+                if isempty(dk), zlb = zb(j); else, zlb = min(z(dk)); end   % bottom of the bg line
+                zlb = zlb - opts.bg_line_pad_cm;       % its edge rows are still a little dark: a white seam
+                ref = z <= zlb & z > zlb - opts.bg_ref_cm;
+                up  = z > zlb & z <= z_surf(j) + dz;     % water now; air rows above stay bg
+                if any(ref) && any(up)
+                    lnC(up) = median(lnC(ref));  Bj(up) = median(Bj(ref));
+                end
+            elseif strcmp(opts.bg_mode, 'shift') && bg_shift(j) ~= 0   % bg surface onto this frame's
                 % Full shift at and above the surface, fading linearly to
                 % zero bg_taper_cm below it: the deep-water lighting does
                 % not move with the waves.  Shifting the whole column under a
@@ -302,6 +340,60 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
         th(band) = 0;                                  % surface band / meniscus
         TH(:, j) = interp1(z - z_surf(j), th, zeta, 'linear', NaN);
     end
+
+    % DISPLAY only (TH above is already set).  The dark surface line reaches
+    % a little below the trough level; it ends below the last row above
+    % dark_ratio x the layer median 1-3 cm further down.  Found per column,
+    % then median-smoothed along x (per column it varied enough to stripe
+    % the fill).  Used for the drawn profile (blank above it: the line is
+    % not dye, and counting it sent theta_bar to ~0.3 at the surface) and,
+    % with band_fill, to paint the band in the image.
+    zlim = min(z_tr, z_surf - opts.surf_gap_cm);
+    zd   = nan(1, nx);
+    for j = find(lit & ~isnan(z_surf))
+        mid = z <= zlim(j) - 1 & z > zlim(j) - 3;
+        m   = median(theta_img(mid, j), 'omitnan');
+        if ~(m > 0), continue; end
+        % the LAST dark row: the line has bright gaps under crests, and
+        % stopping at the first of them left a white sliver
+        below = find(z <= zlim(j) & z > zlim(j) - opts.dark_max_cm);  below = below(:).';
+        if numel(below) > 1 && z(below(1)) < z(below(end)), below = fliplr(below); end   % downward
+        k = find(theta_img(below, j) > opts.dark_ratio * m, 1, 'last');
+        if isempty(k), zd(j) = zlim(j); else, zd(j) = z(below(k)) - dz; end
+    end
+    nsm = max(1, round(10*opts.band_smooth_cm / dx_mm));
+    zd  = movmedian(zd, nsm, 'omitnan');
+    zd(isnan(zd)) = zlim(isnan(zd));
+    zd  = min(zd, zlim);                               % never above the trough level
+    for j = find(lit & ~isnan(z_surf))
+        th = theta_img(:, j);
+        th(z > zd(j)) = NaN;                           % band + dark line: unknown, not zero
+        THd(:, j) = interp1(z - z_surf(j), th, zeta, 'linear', NaN);
+    end
+
+    % Under a crest the band used to read bright (theta ~ 0: white pockets
+    % inside the black surface line) with bg_mode 'shift'; band_fill paints
+    % the band and dark line in the image
+    if ~strcmp(opts.band_fill, 'none')
+        if strcmp(opts.band_fill, 'below')
+            v = nan(1, nx);  vT = nan(1, nx);
+            for j = find(lit & ~isnan(z_surf))
+                ref = z <= zd(j) & z > zd(j) - opts.band_fill_cm;
+                v(j)  = median(theta_img(ref, j), 'omitnan');
+                vT(j) = median(T_img(ref, j), 'omitnan');
+            end
+            v = movmedian(v, nsm, 'omitnan');  vT = movmedian(vT, nsm, 'omitnan');
+        end
+        for j = find(lit & ~isnan(z_surf))
+            fill = z > zd(j) & z <= z_surf(j);
+            switch opts.band_fill
+                case 'black'                           % like the dark line around the pockets
+                    theta_img(fill, j) = Inf;  T_img(fill, j) = 0;   % top / bottom of the colour scales
+                case 'below'                           % the mixed layer under the dark line, up to the surface
+                    theta_img(fill, j) = v(j);  T_img(fill, j) = vT(j);
+            end
+        end
+    end
     % Depth below which the water is clear, i.e. where theta is pure noise:
     % the dye front is the deepest dye the image shows.  NaN front = the
     % column never left the clear-water threshold, so there is no dye at all.
@@ -363,6 +455,8 @@ function [z99_x, jc, z99, zeta, theta_bar, theta_img, T_img, stats] = lif_z99(I,
                    'deep_x', deep_x, 'deep_frac', mean(deep_x), 'drift_ref', drift_used, ...
                    'lit_frac', mean(lit), 'drift_delta', delta, ...
                    'lit', lit, 'band_cm', band_cm, 'bg_shift', bg_shift);
+    tbd = mean(THd, 2, 'omitnan');                     % display profile (band NaN, not 0)
+    stats.theta_bar_disp = tbd(ok);
     zeta = zeta(ok);  theta_bar = theta_bar(ok);
 end
 function s = depth_stats(zeta, th, z_front, opts)
@@ -387,6 +481,7 @@ function s = depth_stats(zeta, th, z_front, opts)
     if nnz(ok) < 2, return; end
     zeta = zeta(ok);  th = th(ok);
     dz   = abs(zeta(2) - zeta(1));
+    zeta_bot = zeta(end);                              % bottom of the view in this profile
 
     % Noise floor of theta, from the clear water below the front
     if isnan(z_front), z_front = 0; end
@@ -436,6 +531,11 @@ function s = depth_stats(zeta, th, z_front, opts)
     C = cumtrapz(-zeta, th);                           % integral from the surface down
     if C(end) <= 0, return; end
     s.z99 = zeta(find(C >= opts.frac * C(end), 1, 'first'));
+    % A z99 at (or within bottom_edge_cm of) the bottom of the view is the
+    % view cutting the integral, not the dye edge: blank, flagged deep.  The
+    % faint tail there does not always clear the noise test above (frame
+    % 3001-type frames drew the line along the frame bottom).
+    if s.z99 <= zeta_bot + opts.bottom_edge_cm, s.deep = true; end
     if s.deep, s.z99 = NaN; end
     s.z90 = zeta(find(C >= 0.90 * C(end), 1, 'first'));
     % RMS dye depth: every part of the profile weighted by its dye, so the

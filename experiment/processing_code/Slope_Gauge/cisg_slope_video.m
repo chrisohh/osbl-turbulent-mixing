@@ -27,8 +27,12 @@ cfg.out_path     = '';             % '' = <out_root>/CISG_slopes_CoreView_<N>_fr
 cfg.out_fps      = 5;
 cfg.quality      = 90;
 cfg.cache_slopes = true;           % save / reuse per-frame slopes
-cfg.lim_s        = [];             % slope colour limit (+-); [] = 3 * rms of the first frame, then held
+cfg.render_only  = false;          % true: never solve; an uncached frame becomes a blank video frame (re-render with new plot settings)
+cfg.lim_s        = [];             % slope colour limit (+-); [] = from cfg.lim_mode, then held
 cfg.lim_eta      = [];             % eta limit (mm, +-);       [] = likewise
+cfg.lim_mode     = 'record';       % [] limits: 'record' = cfg.lim_pct percentile of |S| / |eta| over 30 cached frames spread
+                                   % through the video; 'first' = 3 * rms of the first frame (saturates once the waves grow)
+cfg.lim_pct      = 99.5;
 cfg.bin          = 2;              % block-average factor before the slopes (1 = full resolution; 2 matched bin 1 within 0.5% rms on frame 3000)
 cfg.fig_size     = [1280 800];     % px, fixed for the whole video
 cfg.use_parfor   = true;           % compute missing slopes in parallel (needs cfg.cache_slopes)
@@ -94,6 +98,11 @@ if cfg.cache_slopes
         sub = sprintf('%s_roi_r%d-%d_c%d-%d', sub, r.row_min, r.row_max, r.col_min, r.col_max);
     end
     cache_dir = fullfile(cfg.out_root, sub);
+    n_have = nnz(arrayfun(@(n) isfile(fullfile(cache_dir, sprintf('frame_%04d.mat', n))), frames));
+    fprintf('slope cache %s: %d of %d frames cached\n', cache_dir, n_have, numel(frames));
+    if cfg.render_only && n_have == 0
+        error('cisg_slope_video:noCache', 'render_only: no frame cached in %s (settings differ from the run that made the cache?)', cache_dir);
+    end
     if ~exist(cache_dir, 'dir'), mkdir(cache_dir); end
 end
 if isempty(cfg.out_path)
@@ -192,6 +201,24 @@ if isscalar(frames)
     return
 end
 
+%% ---------------- Colour limits from the whole record ----------------
+if strcmp(cfg.lim_mode, 'record') && (isempty(cfg.lim_s) || isempty(cfg.lim_eta)) && ~isempty(cache_dir)
+    fs = frames(unique(round(linspace(1, numel(frames), min(30, numel(frames))))));
+    fs = fs(arrayfun(@(n) isfile(fullfile(cache_dir, sprintf('frame_%04d.mat', n))), fs));   % cached only: nothing is solved here
+    q = max(2, round(16 / cfg.bin));  q = q + mod(q, 2);    % eta block as in cisg_plot_frame
+    as = [];  ae = [];
+    for n = fs
+        D = load(fullfile(cache_dir, sprintf('frame_%04d.mat', n)), 'Sx', 'Sy');
+        s = abs([D.Sx(:); D.Sy(:)]);  s = s(isfinite(s));  as = [as; double(s(1:7:end))]; %#ok<AGROW>
+        [e, ei] = cisg_slope_to_eta(double(D.Sx), double(D.Sy), 10*setup_b.cm_per_pixel_x, 10*setup_b.cm_per_pixel_y, q);
+        e(ei.valid_frac < 0.5) = NaN;  e = e - mean(e, 'all', 'omitnan');  ae = [ae; abs(e(isfinite(e)))]; %#ok<AGROW>
+    end
+    if isempty(cfg.lim_s) && ~isempty(as),   cfg.lim_s   = prctile(as, cfg.lim_pct); end
+    if isempty(cfg.lim_eta) && ~isempty(ae), cfg.lim_eta = prctile(ae, cfg.lim_pct); end
+    fprintf('colour limits from %d cached frames (%.1f th percentile): slope +-%.3f, eta +-%.2f mm\n', ...
+            numel(fs), cfg.lim_pct, cfg.lim_s, cfg.lim_eta);
+end
+
 %% ---------------- Render ----------------
 fig = figure('Visible', matlab.lang.OnOffSwitchState(live), 'Position', [50 50 cfg.fig_size]);   % visible: the frame being written
 vw = VideoWriter(cfg.out_path, 'MPEG-4');
@@ -205,9 +232,14 @@ tic;
 for i = 1:numel(frames)
     n = frames(i);
     t1 = tic;
-    blank = false;  missing = '';
+    blank = false;  missing = '';  t_s = NaN;
     try
+        if cfg.render_only && ~isfile(fullfile(cache_dir, sprintf('frame_%04d.mat', n)))
+            error('cisg:badFrame', 'not in the slope cache (render_only)');
+        end
+        t_s = tic;
         [Sx_n, Sy_n] = cisg_cache_frame(n, ref_b, setup_b, R.frame_file, cache_dir, cfg.bin, R.dt, R.img_size, warm);
+        t_s = toc(t_s);
         if ~isempty(warm), warm.prev = struct('n', n, 'Sx', Sx_n, 'Sy', Sy_n); end
         obs_n = cisg_load_coreview(R.frame_file(n), R.img_size);
         if cfg.bin > 1, obs_n = uint8(imresize(obs_n, 1 / cfg.bin, 'box')); end
@@ -248,8 +280,8 @@ for i = 1:numel(frames)
     if live, drawnow; end
     writeVideo(vw, print(fig, '-RGBImage', '-r96'));            % getframe fails on an invisible figure
     el = toc;
-    fprintf('  frame %d (%d/%d): %.1f s, rms Sx %.3f Sy %.3f eta %.2f mm, masked %.1f%% | elapsed %.0f s, ETA %.0f s\n', ...
-            n, i, numel(frames), toc(t1), info.rms_sx, info.rms_sy, info.rms_eta, info.masked, el, el / i * (numel(frames) - i));
+    fprintf('  frame %d (%d/%d): %.1f s (slopes %.1f s), rms Sx %.3f Sy %.3f eta %.2f mm, masked %.1f%% | elapsed %.0f s, ETA %.0f s\n', ...
+            n, i, numel(frames), toc(t1), t_s, info.rms_sx, info.rms_sy, info.rms_eta, info.masked, el, el / i * (numel(frames) - i));
 end
 close(vw);  close(fig);
 report_bad(bad_list, bad_msgs, cache_dir);

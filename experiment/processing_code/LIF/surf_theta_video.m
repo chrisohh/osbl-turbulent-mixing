@@ -8,7 +8,7 @@
 % Title: time since wind start, t = camDelay + (n-1)/fs, from the hot-wire
 % file.  The z99 / dye-front time series is saved next to the video
 % (<out_file>_z99.mat) for the z99(t) plot.
-clearvars -except run_num; close all;   % set run_num before calling to pick the run
+clearvars -except run_num run_queue; close all;   % set run_num before calling to pick the run
 addpath(fullfile(fileparts(mfilename('fullpath')), 'util'));
 
 %% ---------------- User settings ----------------
@@ -41,14 +41,17 @@ downsample = 2;
 fo.cmap            = 'bone';    % see lif_surf_figure
 fo.img_xlim        = [-25 22];  % image panels, cm
 fo.img_ylim        = [-22 7];
-fo.z99_floor_cm    = -2.3;      % no z99(x) line while the frame z99 is shallower (side-view floor, dye still at the surface)
+zg.floor_win       = [20 40];   % no z99(x) line until the run's z99 leaves its own surface-layer
+zg.floor_fac       = 1.25;      % plateau (median over floor_win) by floor_fac / 3 sigma / 0.25 cm;
+zg.fixed           = [];        % see util/lif_z99_gate.  A number (e.g. -2.3, run 95) = old fixed floor
 fo.left            = 'raw';%'transmission';   % left panel: 'transmission' I/I_bg (lighting removed) | 'raw'
 fo.trans_clims     = [0.75 1.05];
 fo.theta_clims     = [0 0.25];
 fo.theta_log       = false;
 fo.theta_clims_log = [0.005 0.3];
 fo.profile_xlim    = [-0.01 0.3];
-fo.profile_zlim    = [-15 0];
+fo.profile_zlim    = [];        % set by lif_surf_figure to the theta image's z range
+fo.z99_band        = [5 95];   % z99(x) spread shaded in the profile: [25 75] steadier, [] = none
 fo.fig_pos         = [40 40 2000 650];
 fo.visible         = 'on';
 
@@ -67,16 +70,27 @@ zo.surf_gap_cm   = 0.15;   % top band left out of z99 (meniscus); small since bg
                            % and early on the whole dye layer is only ~1 cm thick
 zo.fit_order     = 2;
 zo.fit_margin_cm = 0.5;
-zo.bin_cm        = 0;      % z99(x) per pixel column: no window
-zo.step_cm       = 0;
+line_bin         = 'auto';  % z99(x) line window (cm): 'auto' = line_k / dye SNR of the run (worst of
+                           % 3 late frames, util/lif_dye_snr), 0.5 cm steps in line_lim; 'registry' =
+                           % R.line_bin_cm; or a number.  SNR 118 ~17 -> 1 cm, 120 ~6 -> 3 cm, 96 ~2 -> 4 cm
+line_k           = 18;
+line_lim         = [1 4];
+zo.bin_cm        = R.line_bin_cm;   % (replaced below unless line_bin = 'registry'; 0 = per column)
+zo.step_cm       = 0;      % (0 with bin 0: every column; with a window: one value per column too)
 zo.xmed          = 11;     % median along x over ~2.5 mm: removes z99(x) spikes
+zo.band_fill     = 'none';  % DISPLAY only: 'below' paints the surface band (the dark line) with
+                           % the mixed-layer theta under it; 'black' = black like the dark
+                           % line; 'none' = as measured.  z99 is unaffected (see lif_z99)
 zo.filter        = dy.filter;
 zo.surf_method   = dy.surf_method;
+zo.z99_all       = 'profile';  % frame z99 from the all-x averaged profile (paper eq. 3.14):
+                           % the only estimate that stays monotonic for faint runs (96)
 zo.snr_min       = 4;      % no z99 unless theta clears this many sigma of the noise
 zo.tail_cm       = 1;      % integral stops after this much quiet water (see lif_z99)
 bg_frames        = R.bg_frames;   % dye-free frames, averaged -> theta = ln(I_bg/I).
                            % ALL must be dye-free: check when the dye arrives (per run).
 dark_file        = [];     % lens-capped frame, same exposure (.raw path): subtracted from I and I_bg; [] = none
+datum_tol_cm     = 1;      % move z = 0 if the early-run surface is further than this from the bg level
 
 out_file      = fullfile(raw_root, sprintf('CoreView_%d', run_num), ...
                          sprintf('CoreView_%d_surf_theta.mp4', run_num));
@@ -105,7 +119,7 @@ ny = 3072/downsample;  nx = 4096/downsample;
 x_cm =  ((1:nx)*downsample - c0(1)) * mmpp / 10;
 z_cm = -((1:ny)*downsample - c0(2)) * mmpp / 10;
 
-zo.bg = [];
+zo.bg = [];  relight = struct('applied', false);  datum_shift = 0;
 if ~isempty(bg_frames)
     bg_frames = intersect(bg_frames, avail);
     if isempty(bg_frames), error('None of the requested bg_frames exist in %s', cam_dir); end
@@ -119,22 +133,61 @@ if ~isempty(bg_frames)
         fprintf('Dark frame: %s\n', dark_file);
     end
     [z0, z_cm, dy] = lif_surface_datum(zo.bg, z_cm, mmpp*downsample, dy);   % z = 0 at the bg-frame water level
+    [zo.bg, relight] = lif_bg_relight(zo.bg, fname, avail, bg_frames, downsample, z_cm, struct('fs', fs));
+    if relight.applied                       % lighting stepped after the bg frames (102: t ~ 14.5 s)
+        fprintf('Lighting step at frame %d: bg re-lit from frames %d..%d (gain %.3f, 5-95%% %.3f..%.3f)\n', ...
+                relight.step_frame, relight.frames_used(1), relight.frames_used(end), relight.gain, relight.gain_range);
+    end
+    % Datum check: the water surface 1-4 s after the bg frames (wind on,
+    % waves still mm-sized) must sit at the bg water level.  102: the bg
+    % frames' edge is a feature 2.6 cm above the water that vanishes with
+    % the first ripples (12.4 s; the camera did not move) -> z = 0 moves to
+    % the early-run surface.  Depths below the local surface are unaffected.
+    ck = intersect(max(bg_frames) + round((1:0.5:4) * fs), avail);
+    zck = nan(size(ck));
+    for k = 1:numel(ck)
+        I = lif_load_raw(fname(ck(k)));  I = I(1:downsample:end, 1:downsample:end);
+        [~, zs_k] = lif_dye_front(I, z_cm, mmpp*downsample, dy);
+        zck(k) = median(zs_k, 'omitnan');
+    end
+    datum_shift = median(zck, 'omitnan');
+    if abs(datum_shift) > datum_tol_cm
+        z_cm = z_cm - datum_shift;
+        dy.surf_window_cm = dy.surf_window_cm - datum_shift;
+        % lif_z99 windows that are heights above the BG water level stay
+        % there (102: the air reference at 2-6 cm would otherwise take in
+        % the bg's own dark edge and add theta ~ +0.05 everywhere)
+        zw = struct('air_window_cm', [2 6], 'bg_window_cm', [-1 1]);   % lif_z99 defaults
+        for fz = fieldnames(zw).'
+            if ~isfield(zo, fz{1}), zo.(fz{1}) = zw.(fz{1}); end
+            zo.(fz{1}) = zo.(fz{1}) - datum_shift;
+        end
+        warning('surf_theta_video:datum', ['Run %d: surface %.2f cm from the bg water level 1-4 s after ' ...
+                'the bg frames -> z = 0 moved to the early-run surface.'], run_num, datum_shift);
+    end
 else
     warning('No bg_frames: z stays measured from the plate (board centre).');
 end
 
-[~, hw_name] = fileparts(hw_file);
-[camDelay, hw] = lif_hw_cached(hw_file, hw_avg_s, fullfile(cal_dir, ['hwsync_' hw_name '.mat']));
+[camDelay, hw, wave] = lif_wind_clock(R, hw_avg_s, cal_dir);   % hot-wire / ref probe / wave file, or assumed start + stand-in; wave gauge (own or stand-in)
 t_wind = camDelay + (frames - 1) / fs;
 
 %% ---------------- Figure + writer ----------------
-if show_hw
+if show_hw && ~isempty(hw)
     fo.hw = hw;
     fo.hw.xlim = hw_xlim;
+    if ~isempty(wave), fo.wave = wave; end   % wave-gauge panel under the wind
 end
+fo.ct = lif_ct_profile(R.density_file);   % stratified runs: pre-run CT profile in the profile panel ([] otherwise)
+if ~isempty(fo.ct)
+    fprintf('CT profile %s: pycnocline %.1f..%.1f cm\n', fo.ct.file, fo.ct.pyc);
+end
+fo.z99_floor_cm = NaN;          % per frame from the gate below
 h = lif_surf_figure(x_cm, z_cm, fo);
+G = lif_z99_gate(zg);
 
-v = VideoWriter(out_file, 'MPEG-4');
+vid_file = lif_video_file(out_file);   % time-stamped name if the old video is open somewhere
+v = VideoWriter(vid_file, 'MPEG-4');
 v.FrameRate = video_fps;
 v.Quality   = video_quality;
 open(v);
@@ -150,6 +203,24 @@ zrms_all    = nan(nFrames, 1);              % RMS dye depth (median of bins), cm
 peak_all    = nan(nFrames, 1);              % max of the all-x theta profile
 deep_all    = nan(nFrames, 1);              % fraction of x with dye at the frame bottom (z99 beyond view)
 
+%% ---------------- z99(x) line window from the dye SNR ----------------
+if isnumeric(line_bin)
+    zo.bin_cm = line_bin;
+elseif strcmp(line_bin, 'auto')
+    % late frames: the dye is most diluted there, so they set the worst SNR
+    pf = frames(max(1, round(numel(frames) * [0.6 0.8 1])));
+    snr = nan(size(pf));
+    for k = 1:numel(pf)
+        I = lif_load_raw(fname(pf(k)));  I = I(1:downsample:end, 1:downsample:end);
+        [zf_k, zs_k] = lif_dye_front(I, z_cm, mmpp*downsample, dy);
+        [~, ~, ~, ~, ~, th_k] = lif_z99(I, z_cm, zs_k, zf_k, mmpp*downsample, zo);
+        snr(k) = lif_dye_snr(th_k, z_cm, zs_k);
+    end
+    zo.bin_cm = min(max(round(2 * line_k / min(snr)) / 2, line_lim(1)), line_lim(2));
+    fprintf('z99(x) line window %.1f cm (dye SNR %s at frames %s; registry %.1f cm)\n', ...
+            zo.bin_cm, mat2str(round(snr, 1)), mat2str(pf), R.line_bin_cm);
+end
+
 %% ---------------- Frames ----------------
 tic;
 for i = 1:nFrames
@@ -164,6 +235,7 @@ for i = 1:nFrames
     z99_x_all(i,:) = z99_x;
     z90_all(i) = st.z90;  zrms_all(i) = st.zrms;  peak_all(i) = st.peak;  deep_all(i) = st.deep_frac;
 
+    [h.opts.z99_floor_cm, G] = lif_z99_gate(G, t_wind(i), z99_all(i));
     if strcmp(fo.left, 'transmission'), L = T_img; else, L = I; end
     lif_surf_update(h, L, theta_img, x_cm, z_front_all(i,:), z_surf_all(i,:), ...
         z99_x, jc, zeta, theta_bar, z99_all(i), ...
@@ -184,7 +256,7 @@ for i = 1:nFrames
     end
 end
 clear cleanupObj;   % closes the writer
-fprintf('\nWrote %s  (%d frames, %.1f s)\n', out_file, nFrames, toc);
+fprintf('\nWrote %s  (%d frames, %.1f s)\n', vid_file, nFrames, toc);
 
 %% ---------------- Save the z99 time series ----------------
 % z99 is NaN while there is no detectable dye (bg_frames included: they are
@@ -197,5 +269,5 @@ ts_file = fullfile(p, [b '_z99.mat']);
 save(ts_file, 'frames', 't_wind', 'x_cm', 'z99_all', 'z99_x_all', 'x99_cm', ...
      'z90_all', 'zrms_all', 'peak_all', 'deep_all', ...
      'z_front_all', 'z_surf_all', 'depth_all', 'mmpp', 'c0', 'downsample', ...
-     'dy', 'zo', 'sc', 'hw_file', 'run_num', 'R');
+     'dy', 'zo', 'sc', 'hw_file', 'run_num', 'R', 'G', 'relight', 'datum_shift');   % G.t_on: when the z99 line came on
 fprintf('Saved z99 time series to %s\n', ts_file);

@@ -45,9 +45,7 @@ S = load(ts_file);
 t = D.t;
 fprintf('%s: %d frames, t = %.1f..%.1f s\n', ts_file, numel(t), t(1), t(end));
 
-[~, hw_name] = fileparts(hw_file);
-[~, hw] = lif_hw_cached(hw_file, hw_avg_s, fullfile(here, 'calibration', ...
-                        sprintf('hwsync_%s_avg%g.mat', hw_name, hw_avg_s)));
+[~, hw] = lif_wind_clock(R, hw_avg_s, fullfile(here, 'calibration'));   % [] = no wind record
 
 nm = size(measures, 1);
 Zraw = cell(nm, 1);  Zf = cell(nm, 1);  flag = cell(nm, 1);  flo = nan(nm, 1);
@@ -110,10 +108,17 @@ title(ax1, sprintf(['Dye depth: dots = per frame, line = %g s running median, ' 
 set(ax1, 'FontSize', 12, 'FontName', 'times');
 
 ax2 = nexttile(tl);
-plot(ax2, hw.t, hw.Y, 'LineWidth', 0.8);
+if ~isempty(hw)
+    plot(ax2, hw.t, hw.Y, 'LineWidth', 0.8);
+    legend(ax2, hw.names, 'Interpreter', 'latex', 'Location', 'northwest');
+    if isfield(hw, 'ylabel'), ylabel(ax2, hw.ylabel); else, ylabel(ax2, 'velocity (m/s)'); end
+    tlim = [min(t(1), hw.t(1)) max(t(end), hw.t(end))];
+else
+    text(ax2, 0.5, 0.5, 'no wind record for this run', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    tlim = t([1 end]).';
+end
 grid(ax2, 'on'); box(ax2, 'on');
-xlabel(ax2, 'time since wind start (s)'); ylabel(ax2, 'velocity (m/s)');
-legend(ax2, hw.names, 'Interpreter', 'latex', 'Location', 'northwest');
+xlabel(ax2, 'time since wind start (s)');
 set(ax2, 'FontSize', 12, 'FontName', 'times');
 linkaxes([ax1 ax2], 'x');
-xlim(ax1, [min(t(1), hw.t(1)) max(t(end), hw.t(end))]);
+xlim(ax1, tlim);

@@ -8,7 +8,8 @@ function [mmpp, c0] = lif_scale_cached(fplate, sc, cache_file)
 % is computed and written to cache_file; elsewhere cache_file is loaded.
 % Copy / commit cache_file (a few bytes) with the code.
 
-    if isfile(fplate)
+    % fplate: one file or a cell list of plate frames (first usable is taken)
+    if any(isfile(string(fplate)))
         [mmpp, c0] = lif_plate_scale(fplate, sc);
         if ~isfolder(fileparts(cache_file)), mkdir(fileparts(cache_file)); end
         save(cache_file, 'mmpp', 'c0', 'sc', 'fplate');
@@ -22,6 +23,6 @@ function [mmpp, c0] = lif_scale_cached(fplate, sc, cache_file)
             warning('Scale settings (sc) differ from the cached ones -- rerun where the plate image is.');
         end
     else
-        error('Neither the plate image %s nor the cache %s exists.', fplate, cache_file);
+        error('Neither the plate image(s) %s nor the cache %s exists.', strjoin(string(fplate), ', '), cache_file);
     end
 end

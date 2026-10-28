@@ -1,0 +1,26 @@
+
+===== run 92  (19:37:02; still queued: [89 95]) =====
+Water_Surf: 3249 complete frames (1..3249); writing 325 -> D:\HLAB_2026\Core\CoreView_92\CoreView_92_surf_theta.mp4
+Plate D:\HLAB_2026\Core\CoreView_93\Water_Surf\CoreView_93_Water_Surf_01.raw: 90 corners, 'coarse' board, square 11.000 mm (design 40 mm)
+  plate 0.0775 mm/px (uniform-scale RMS 0.83 px, max 1.71 px)
+  camera-plate ~846 mm; offset 25.0 mm (apparent 18.8) -> 0.0793 mm/px (+2.22%)
+  scale cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\scale_Water_Surf_Core93.mat
+Background: mean of 10 dye-free frames (1..91)
+Datum: reference water level at 7.02 cm above the board centre (x-std 0.04 cm) -> z = 0
+Hot-wire sync cached to C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\calibration\hwsync_hotwire_20260923_081422_avg0.02.mat
+{Operation terminated by user during getframeWithDecorationsShortcut
+
+
+In alternatePrintPath
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('print', 'C:\Program Files\MATLAB\R2022a\toolbox\matlab\graphics\printing\print.m', 83)" style="font-weight:bold">print</a> (<a href="matlab: opentoline('C:\Program Files\MATLAB\R2022a\toolbox\matlab\graphics\printing\print.m',83,0)">line 83</a>)
+pj = alternatePrintPath(pj);
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('surf_theta_video', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m', 174)" style="font-weight:bold">surf_theta_video</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\surf_theta_video.m',174,0)">line 174</a>)
+    rgb = print(h.fig, '-RGBImage', '-r0');                 % works with an invisible figure
+
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('process_runs', 'C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m', 16)" style="font-weight:bold">process_runs</a> (<a href="matlab: opentoline('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF\process_runs.m',16,0)">line 16</a>)
+        surf_theta_video;
+} 
+clear functions
+cd('C:\Users\airsealab\Documents\GitHub\osbl-turbulent-mixing\experiment\processing_code\LIF'); clear functions; run_queue = [92 89 95]; process_runs
